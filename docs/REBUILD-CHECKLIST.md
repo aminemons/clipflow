@@ -24,10 +24,12 @@ Updated 2026-09-20. API/media verification and browser verification are distingu
 | Research | Three repositories traced through source; competitors and license decisions linked | No unlicensed code/assets copied |
 | Hosted authorization | Fail-closed owner-only Supabase adapter; origin/session/media guards pass mocked tests | Live Supabase owner not configured; single private workspace only |
 | Deployment | Vercel/Supabase dashboard access confirmed; worker Docker/proxy configuration prepared | Blocked: persistent HTTPS video worker host; no working cloud URL claimed |
-| Source/handover | Setup, env example, architecture, research, validation, demo instructions present | GitHub publication recorded after push |
+| Source/handover | Private [GitHub repository](https://github.com/aminemons/clipflow), setup, env example, architecture, research, validation and demo instructions | Recruiter needs repository access; CI example is not enabled |
 
 ## Validation and recovery
 
 Backend: 85 tests passed in the full suite; 17 passed in a later focused run covering the two added export-revision tests. These are separate overlapping runs. Latest TypeScript/Vite production build passed (1595 modules). The live QA report for project `bc2e04197bc3` confirms 360×640 H.264/AAC output, 1.25× speed, batch count 2, immutable exports, strict-max suggestions and delete/restore. See VALIDATION.md for exact scope.
 
 Pre-rebuild source and project/job metadata are in `work/rebuild-backup-20260920` beside the repository. Original videos remain in the data directory. First legacy saves retain `.json.v1.bak`; later saves retain a last-valid `.json.bak`. User projects and secrets are excluded from source delivery.
+
+Final restart preserved all five original projects. Disposable QA projects were archived outside the source repository. A real-media tracking probe exposed a graphic being detected as a face; multiple-person accuracy remains unverified, and manual focus remains necessary for such scenes.

@@ -71,3 +71,11 @@ The application runs as a single-user local service. Public multi-user deploymen
 - A decoded proof frame was inspected: face remains visible, caption is near the requested 90% vertical position. FFmpeg decoded the complete proof without errors. The measured audio/video endpoint difference is 25 ms; perceptual lip-sync and intelligibility are not established by that measurement.
 - The latest build could not receive a fresh browser interaction pass: Chrome remained connected and listed authenticated tabs, but control returned “Debugger unattached” and timeouts. Earlier browser results above apply to the earlier build. The new save/review/trim interactions have code/build/API evidence, not a new browser sign-off.
 - Hosted media, live provider keys, a representative Darija accuracy benchmark, and a real multi-speaker speech benchmark remain unverified. No live cloud provider or deployment result is implied by mock auth tests.
+
+### Delivery and final checks
+
+- The fresh YouTube source was also trimmed, captioned and exported: 360×640 video and AAC audio both measure exactly 4.000 seconds.
+- A two-detection scene from the existing 21-minute source was tested with left/right preference. Visual inspection showed that one detection was a graphic emblem, not a face; the other was a portrait. This exposes a Haar false positive and is **not** a successful multiple-person benchmark. Graphic-heavy material can need manual framing; no identity or active-speaker accuracy is claimed.
+- Restarted the worker and verified the latest frontend plus all five original projects and their clip counts. Four disposable QA projects were moved, with their media and job-record backup, to `work/rebuild-verification-archive`; original user projects were preserved.
+- Source is published at https://github.com/aminemons/clipflow (private). No environment secrets, user media, speech models or private font binaries were included. GitHub Actions configuration is supplied as `docs/github-actions.example.yml`: the authenticated OAuth scope could not publish files under `.github/workflows`.
+- No cloud deployment has been completed. Vercel and Supabase dashboard sign-in is confirmed, but there is no configured persistent HTTPS worker host or Supabase owner configuration. Live Chrome control stopped responding after sign-in verification.

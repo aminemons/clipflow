@@ -96,6 +96,7 @@ Higgsfield B-roll is optional. Enable it and add `HF_API_KEY` and `HF_API_SECRET
 ## Known limits
 
 - Subject framing supports automatic face continuity or a left/right face preference, with a brightness-based saliency fallback when no face is found. It is not active-speaker or identity recognition; crossings, small faces, occlusion and fast cuts can still need manual framing correction.
+- The Haar face detector can mistake graphics for faces; this occurred in a real-media check. Use manual focus and a render proof for graphic-heavy material. Multiple-person tracking has not passed a representative accuracy benchmark.
 - The browser preview is an approximate editing view. Inspect the rendered MP4 to verify the final crop and encoding.
 - YouTube ingestion depends on yt-dlp and the source platform. Upstream changes, private videos, age gates, region restrictions, or network failures can stop import.
 - Jobs use an in-process thread worker. Stopping or restarting the app interrupts active work; retry the operation after restart.
