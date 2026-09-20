@@ -189,7 +189,7 @@ export default function ProviderSettings({
             <option value="openai">OpenAI</option>
             <option value="anthropic">Claude</option>
             <option value="gemini">Gemini</option>
-            <option value="ollama">Ollama · on this computer</option>
+            <option value="ollama">Ollama · self-hosted</option>
           </select>
         </label>
         {cloud && (
@@ -202,8 +202,8 @@ export default function ProviderSettings({
         <div className="settings-subtitle">Text analysis models</div>
         <p className="page-hint">
           These models select transcript highlights. Speech recognition uses the
-          transcription provider above. Ollama runs on this computer after you
-          install it and download a model.
+          transcription provider above. Ollama requires a separate installation
+          and a downloaded model on the machine running Clipflow's video engine.
         </p>
         {(
           [

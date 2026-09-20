@@ -130,7 +130,7 @@ export default function CameraControls({
           <option value="fit">Show the whole frame</option><option value="blur">Show with blurred background</option>
         </select></label>
         <label>Visual analysis<select disabled={disabled} value={clip.vision_provider || "local"} onChange={(e) => onPatch({vision_provider: e.target.value as Clip["vision_provider"]})}>
-          <option value="local">OpenCV · free, on this computer</option><option value="gemini">Gemini · sends sampled frames, requires key</option>
+          <option value="local">OpenCV · free</option><option value="gemini">Gemini · sends sampled frames, requires key</option>
         </select></label>
       </div>}
       <div

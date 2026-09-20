@@ -33,7 +33,7 @@ const platformCopy: Record<Platform, { title: string; description: string; docs:
 };
 
 function Credential({ label, value, present, onChange }: { label: string; value: string; present?: boolean; onChange: (value: string) => void }) {
-  return <label className="publishing-field">{label}<input type="password" autoComplete="new-password" value={value} placeholder={present ? "Saved · enter to replace" : "Not configured"} onChange={(event) => onChange(event.target.value)} /><small>{present ? "Saved on this computer; never returned by the API." : "Write only. Leave blank to keep it unchanged."}</small></label>;
+  return <label className="publishing-field">{label}<input type="password" autoComplete="new-password" value={value} placeholder={present ? "Saved · enter to replace" : "Not configured"} onChange={(event) => onChange(event.target.value)} /><small>{present ? "Saved with this workspace; never returned by the API." : "Write only. Leave blank to keep it unchanged."}</small></label>;
 }
 function Status({ status }: { status?: ProviderStatus }) {
   if (!status) return <span className="publishing-status is-muted">Not configured</span>;

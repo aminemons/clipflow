@@ -109,7 +109,7 @@ export default function SettingsPage({
         {tab === "storage" && (
           <section className="storage-panel">
             <h2>
-              <HardDrive size={21} /> Storage on this computer
+              <HardDrive size={21} /> Workspace storage
             </h2>
             <p>
               Source files and exports are kept separately. Archiving a project

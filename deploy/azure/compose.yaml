@@ -37,6 +37,8 @@ services:
     volumes:
       - clipflow-data:/app/data
       - clipflow-models:/app/data/models
+      # Optional release artifact; upload build/desktop beside the source tree.
+      - ../../build/desktop:/app/build/desktop:ro
     restart: unless-stopped
     logging:
       driver: json-file

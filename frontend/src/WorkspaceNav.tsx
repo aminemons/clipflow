@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import type { TourPage } from "./GuidedTour";
 import { useEffect, useState } from "react";
+import { useHostedAuth } from "./HostedGate";
 
 export default function WorkspaceNav({
   page,
@@ -33,6 +34,7 @@ export default function WorkspaceNav({
   onCompact: () => void;
   activeJobs: number;
 }) {
+  const { hosted } = useHostedAuth();
   const [desktopReady, setDesktopReady] = useState(false);
   useEffect(() => {
     fetch("/api/desktop")
@@ -119,7 +121,7 @@ export default function WorkspaceNav({
           {compact ? <PanelLeftOpen size={18} /> : <PanelLeftClose size={18} />}
           <span>Collapse sidebar</span>
         </button>
-        <p>Saved on this computer</p>
+        <p>{hosted ? "Saved in this private workspace" : "Saved on this computer"}</p>
       </div>
     </aside>
   );
