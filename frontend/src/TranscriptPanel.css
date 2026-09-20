@@ -1,0 +1,130 @@
+.transcript-pane {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+}
+.transcript-tools,
+.transcript-selection,
+.transcript-empty {
+  padding: 18px;
+}
+.transcript-tools {
+  border-bottom: 1px solid var(--line, #dedce5);
+}
+.transcript-tools p,
+.transcript-empty p {
+  font-size: 12px;
+  line-height: 1.6;
+  color: #6f6b7d;
+  margin: 12px 0;
+}
+.transcript-search {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  background: white;
+  border: 1px solid #d4d2dc;
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+.transcript-search input {
+  border: 0;
+  min-width: 0;
+  width: 100%;
+  outline-offset: 3px;
+  background: transparent;
+  font-size: 12px;
+}
+.transcript-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+.transcript-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 0;
+  padding: 3px 0;
+  background: transparent;
+  color: #6650a4;
+  font-size: 11px;
+  cursor: pointer;
+}
+.transcript-rows {
+  flex: 1;
+  min-height: 100px;
+  overflow-y: auto;
+  padding: 8px 14px 18px;
+}
+.transcript-row {
+  padding: 12px 8px;
+  border-bottom: 1px solid #e0dde6;
+  border-left: 3px solid transparent;
+}
+.transcript-row.chosen {
+  background: #eeeafa;
+  border-left-color: #8770c9;
+}
+.transcript-row-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.transcript-row-head label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: #656073;
+}
+.transcript-row input {
+  accent-color: #7963b4;
+}
+.transcript-row textarea {
+  display: block;
+  width: 100%;
+  min-height: 65px;
+  resize: vertical;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  padding: 7px;
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #302b40;
+}
+.transcript-row textarea:focus {
+  background: white;
+  border-color: #a493ce;
+  outline: 2px solid #d9cfee;
+}
+.transcript-selection {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  border-top: 1px solid #dcd8e5;
+  font-size: 12px;
+  background: #f7f5fa;
+}
+.transcript-selection .export-button {
+  width: 100%;
+}
+.transcript-tools .transcript-error {
+  color: #a02d40;
+}
+.transcript-no-match {
+  padding: 18px 4px;
+  color: #6f6b7d;
+  font-size: 13px;
+}
+.transcript-empty h3 {
+  font-size: 18px;
+  font-weight: 600;
+}

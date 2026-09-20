@@ -1,0 +1,29 @@
+services:
+  clipflow:
+    build: .
+    ports:
+      - "127.0.0.1:8767:8767"
+    volumes:
+      - clipflow-data:/app/data
+    environment:
+      CLIPFLOW_DATA: /app/data
+      CLIPFLOW_SETTINGS_FILE: /app/data/settings.env
+      CLIPFLOW_HIGHLIGHT_PROVIDER: ${CLIPFLOW_HIGHLIGHT_PROVIDER:-local}
+      GROQ_HIGHLIGHT_MODEL: ${GROQ_HIGHLIGHT_MODEL:-llama-3.3-70b-versatile}
+      CLIPFLOW_HIGGSFIELD_ENABLED: ${CLIPFLOW_HIGGSFIELD_ENABLED:-true}
+      CLIPFLOW_TRANSCRIPTION_PROVIDER: ${CLIPFLOW_TRANSCRIPTION_PROVIDER:-local}
+      CLIPFLOW_WHISPER_MODEL: ${CLIPFLOW_WHISPER_MODEL:-}
+      CLIPFLOW_TRANSCRIPTION_QUALITY: ${CLIPFLOW_TRANSCRIPTION_QUALITY:-balanced}
+      CLIPFLOW_DIALECT: ${CLIPFLOW_DIALECT:-none}
+      CLIPFLOW_MODEL_CACHE: /app/data/models
+      OMP_NUM_THREADS: 2
+      MKL_NUM_THREADS: 2
+      OPENBLAS_NUM_THREADS: 2
+      CLIPFLOW_LANGUAGE: ${CLIPFLOW_LANGUAGE:-}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      GROQ_WHISPER_MODEL: ${GROQ_WHISPER_MODEL:-whisper-large-v3-turbo}
+      HF_API_KEY: ${HF_API_KEY:-}
+      HF_API_SECRET: ${HF_API_SECRET:-}
+    restart: unless-stopped
+volumes:
+  clipflow-data:

@@ -1,0 +1,41 @@
+# Hosted owner workspace
+
+Clipflow keeps local mode account-free. Hosted mode is an intentionally small deployment adapter for one owner workspace: one persistent FastAPI worker, one data directory, and one Supabase Auth owner. It is not a shared multi-user datastore. A future multi-user release needs isolated worker/data deployments or an explicit tenant migration before enabling more than one owner.
+
+## Required hosted settings
+
+Set these variables on the persistent worker:
+
+```text
+CLIPFLOW_MODE=hosted
+CLIPFLOW_PUBLIC_ORIGIN=https://studio.example.com
+SUPABASE_URL=https://your-project.supabase.co
+SUPABASE_PUBLISHABLE_KEY=sb_publishable_...
+CLIPFLOW_OWNER_ID=<the Supabase auth user id>
+```
+
+`CLIPFLOW_PUBLIC_ORIGIN` must be HTTPS and is compared exactly against the browser `Origin`. Hosted startup fails closed if it is missing, uses HTTP, contains a path/query, or if the Supabase URL, publishable key, or owner ID is absent. `SUPABASE_ANON_KEY` is accepted as a compatibility alias. Provider secrets stay on the worker and are never returned by the auth endpoints.
+
+The adapter uses a server-side opaque `clipflow_session` cookie. The raw token is only sent in the Secure, HttpOnly, SameSite=Lax cookie; the worker stores a SHA-256 digest with an expiry. Sessions are intentionally in memory, so a worker restart signs the owner out. Login is verified with Supabase's REST `POST /auth/v1/token?grant_type=password` endpoint, whose response includes a user object and access token in the [official Auth API](https://supabase.com/docs/reference/self-hosting-auth), then the returned user ID must exactly equal `CLIPFLOW_OWNER_ID`. Five attempts per socket peer per minute are allowed, with an additional process-wide cap; spoofable `X-Forwarded-For` headers are not used for authorization or as the only limiter key. Passwords are never logged.
+
+## Root integration
+
+The root FastAPI app calls `install_hosted_security(app)` during construction, after the FastAPI object exists and before serving requests. It installs `/api/auth/session`, `/api/auth/login`, and `/api/auth/logout` plus a gate covering every `/api/*` and `/media/*` request. In local mode it adds a harmless `/api/auth/session` mode probe and no login dependency. In hosted mode, anonymous `GET /api/health` is intercepted to a minimal `{ "ready": true }`; an authenticated owner request may continue to the existing full capability response. API docs (`/docs`, `/redoc`, `/openapi.json`) are owner-only. API, auth, media, and docs responses receive `Cache-Control: no-store`.
+
+The existing app's CORS middleware uses the same single `CLIPFLOW_PUBLIC_ORIGIN` in hosted mode. The hosted middleware independently rejects missing or foreign `Origin` headers on every mutation, including login, logout, uploads, settings, job creation, edits, and deletes. Routes that need the identity can use `require_hosted_owner` as a FastAPI dependency. Call `install_hosted_security(app)` in both modes: local mode remains account-free while exposing only the harmless `/api/auth/session` mode probe; hosted mode adds the owner gate and auth routes.
+
+On the Vite side, `main.tsx` wraps `<App />` with `<HostedGate>`. The gate probes `/api/auth/session` at runtime: the local mode response mounts the editor without an account, the hosted response mounts the owner login or editor, and a network/5xx failure shows worker unavailable instead of pretending the user is signed out. `VITE_CLIPFLOW_MODE=hosted` can force hosted behavior for a deployment and catches a missing hosted auth route. The gate exposes `useHostedAuth().logout()` and includes a small sign-out control while hosted. Do not put Supabase or provider secrets in Vite variables.
+
+## Same-origin Vercel proxy
+
+The browser should call relative `/api/...` and `/media/...` URLs. Configure the Vercel project to proxy both prefixes to the persistent worker origin over HTTPS, with the worker origin stored as deployment configuration rather than committed source. Large multipart uploads through the external rewrite remain unverified on a live deployment; a serverless function proxy must not be used for source uploads because normal Vercel request body limits are far below Clipflow's local 500 MiB limit. The proxy must preserve `Cookie`, `Content-Type`, `Origin`, and response `Set-Cookie` headers.
+
+For a generated rewrite file, set the worker origin in the deployment environment and run `CLIPFLOW_WORKER_ORIGIN=https://worker.example.com node scripts/generate-vercel-config.mjs` before `vercel deploy`. Run from the repository root and keep the Vercel root directory at the repository root: the generated file includes the frontend install/build commands and `frontend/dist` output directory. Set `VITE_CLIPFLOW_MODE=hosted` on the frontend deployment. The generated file is ignored by Git. This configuration has not been deployed without an actual worker host. The script rejects missing, HTTP, localhost, loopback, credential-bearing, or path-qualified origins; it never emits a localhost fallback.
+
+The external worker origin must be HTTPS and must not be localhost or a loopback address. Keep the Vercel frontend and worker on the same public origin from the browser's point of view; this lets the Secure HttpOnly cookie accompany API and media requests without exposing it to JavaScript. If a rewrite is generated from an environment variable, fail the deployment script when the variable is absent or not HTTPS rather than falling back to localhost.
+
+The worker needs persistent storage for `CLIPFLOW_DATA`, enough temporary disk for uploads/renders, FFmpeg/FFprobe, and a long request/job lifetime. Run one worker for the current in-process executor. Do not deploy the processing worker as an ephemeral serverless function: jobs, media, and the in-memory session store must share the same persistent instance.
+
+## Verification
+
+`backend/tests/test_hosting.py` uses a fake Supabase client and covers fail-closed configuration, local no-account mode, owner login, Secure/HttpOnly opaque cookies, non-owner rejection, exact-origin mutation checks, media/API protection, logout revocation, rate limiting, and session expiry. It does not contact a live Supabase account; perform one manual smoke test after the worker and Supabase owner are configured.

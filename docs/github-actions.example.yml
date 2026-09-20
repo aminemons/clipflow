@@ -1,0 +1,21 @@
+# Copy to .github/workflows/ci.yml to enable GitHub Actions.
+name: Validate Clipflow
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: sudo apt-get update && sudo apt-get install -y ffmpeg fonts-dejavu-core
+      - run: pip install -r backend/requirements.txt pytest httpx
+      - run: python -m pytest backend/tests tests -q
+      - run: npm ci && npm run build
+        working-directory: frontend
