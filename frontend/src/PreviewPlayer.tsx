@@ -1,6 +1,15 @@
-import { useEffect, useRef, useState, type MutableRefObject, type RefObject } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type MutableRefObject,
+  type RefObject,
+} from "react";
 import { Aperture, Image, Maximize2, Pause, Play, X } from "lucide-react";
 import type { Clip, Project } from "./editorTypes";
+import { useDialogFocus } from "./useDialogFocus";
+import { captionAt, captionFont } from "./captionLayout";
 
 const clamp = (n: number, a: number, b: number) => Math.min(b, Math.max(a, n));
 const fmt = (seconds: number) => {
@@ -22,6 +31,7 @@ export default function PreviewPlayer({
   onTimeChange,
   onPatch,
   onRenderProof,
+  renderDisabled = false,
   onUseSource,
   onExpand,
 }: {
@@ -38,10 +48,12 @@ export default function PreviewPlayer({
   onTimeChange: (time: number) => void;
   onPatch: (id: string, patch: Partial<Clip>) => void;
   onRenderProof: () => void;
+  renderDisabled?: boolean;
   onUseSource: () => void;
   onExpand: () => void;
 }) {
   const frameRef = useRef<HTMLDivElement>(null);
+  const dialogRef = useDialogFocus<HTMLDivElement>(expanded);
   const [frameWidth, setFrameWidth] = useState(220);
   useEffect(() => {
     const frame = frameRef.current;
@@ -86,12 +98,10 @@ export default function PreviewPlayer({
     video.addEventListener("loadedmetadata", applyPlayback);
     return () => video.removeEventListener("loadedmetadata", applyPlayback);
   }, [clip?.id, speed, sourceVolume, proofUrl, videoRef]);
-  const transcriptCaption =
-    (clip?.transcript ?? project?.transcript)
-      ?.find(
+  const transcriptCaption = captionAt(
+    (clip?.transcript ?? project?.transcript)?.find(
         (segment) => activeTime >= segment.start && activeTime <= segment.end,
-      )
-      ?.text?.trim() || "";
+      ), activeTime);
   const captionText = clip?.caption_text?.trim() || transcriptCaption;
   function point(event: React.PointerEvent) {
     const rect = frameRef.current?.getBoundingClientRect();
@@ -121,24 +131,46 @@ export default function PreviewPlayer({
   }
   function toggle() {
     if (!videoRef.current) return;
-    if (
-      !proofUrl &&
-      clip &&
-      videoRef.current.currentTime >= clip.end
-    ) {
+    if (!proofUrl && clip && videoRef.current.currentTime >= clip.end) {
       videoRef.current.currentTime = clip.start;
     }
     if (videoRef.current.paused) videoRef.current.play().catch(() => undefined);
     else videoRef.current.pause();
   }
+  const previewAspect = clip
+    ? clip.aspect_ratio || "9:16"
+    : `${project?.width || 16}:${project?.height || 9}`;
   const frame = (
     <div
       className={`preview-inner ${expanded ? "preview-inner-expanded" : ""}`}
       ref={frameRef}
+      style={
+        {
+          aspectRatio: previewAspect.replace(":", "/"),
+          "--preview-ratio": previewAspect
+            .split(":")
+            .map(Number)
+            .reduce((width, height) => width / height),
+        } as CSSProperties
+      }
     >
       {source ? (
         <video
           className={proofUrl ? "proof-video" : "source-video"}
+          style={
+            proofUrl
+              ? undefined
+              : {
+                  objectFit:
+                    !clip || clip.framing !== "manual"
+                      ? "contain"
+                      : "cover",
+                  objectPosition:
+                    clip?.framing === "manual"
+                      ? `${(clip.focus_x ?? 0.5) * 100}% 50%`
+                      : "50% 50%",
+                }
+          }
           ref={videoRef}
           src={source}
           poster={proofUrl ? undefined : project?.thumbnail_url}
@@ -161,11 +193,7 @@ export default function PreviewPlayer({
             }
             onTimeChange(
               proofUrl
-                ? clamp(
-                    (clip?.start || 0) + sourceTime * speed,
-                    0,
-                    duration,
-                  )
+                ? clamp((clip?.start || 0) + sourceTime * speed, 0, duration)
                 : sourceTime,
             );
           }}
@@ -188,10 +216,10 @@ export default function PreviewPlayer({
         <div className="source-missing">
           <Image size={14} />
           <span>Render a proof to inspect the final framing</span>
-          <button onClick={onRenderProof}>Render proof</button>
+          <button disabled={renderDisabled} onClick={onRenderProof}>Render preview</button>
         </div>
       )}
-      {clip && !proofUrl && clip.caption_enabled !== false && (
+      {clip && captionText && !proofUrl && clip.caption_enabled !== false && (
         <button
           className={`caption-overlay ${captionText ? "" : "caption-placeholder"} caption-${clip.caption_style || "clean"}`}
           aria-label="Drag caption position"
@@ -199,15 +227,15 @@ export default function PreviewPlayer({
             left: `${captionPoint.x * 100}%`,
             top: `${captionPoint.y * 100}%`,
             color: clip.caption_color || "#fff",
-            fontSize: `${(frameWidth / 720) * (clip.caption_style === "bold" ? 64 : clip.caption_style === "minimal" ? 46 : 52)}px`,
-            fontFamily: '"DejaVu Sans", Arial, sans-serif',
+            fontSize: `${(frameWidth / 720) * (clip.caption_size ?? (clip.caption_style === "bold" ? 64 : clip.caption_style === "minimal" ? 46 : 52))}px`,
+            fontFamily: captionFont(clip.caption_font, captionText),
             fontWeight: clip.caption_style === "bold" ? 700 : 400,
           }}
           onPointerDown={startCaptionDrag}
           onPointerMove={moveCaptionDrag}
           onPointerUp={endCaptionDrag}
         >
-          {captionText || "Caption placeholder — add text in Captions"}
+          {captionText}
         </button>
       )}
     </div>
@@ -231,9 +259,9 @@ export default function PreviewPlayer({
         <button
           className="preview-control"
           onClick={onRenderProof}
-          disabled={!clip || !!proofUrl}
+          disabled={!clip || !!proofUrl || renderDisabled}
         >
-          Render proof
+          Render preview
         </button>
         {proofUrl && (
           <button className="preview-control" onClick={onUseSource}>
@@ -252,10 +280,12 @@ export default function PreviewPlayer({
         <span>
           {proofUrl
             ? "Exact framing proof"
-            : "Original frame · framing approximate · drag captions"}
+            : clip
+              ? "Full source · render to see camera and effects"
+              : "Full source · no cuts applied"}
         </span>
         <span>
-          {clip ? `${fmt(clip.start)} – ${fmt(clip.end)}` : "No clip selected"}
+          {clip ? `${fmt(clip.start)} – ${fmt(clip.end)}` : fmt(duration)}
         </span>
       </div>
     </div>
@@ -264,6 +294,7 @@ export default function PreviewPlayer({
   return (
     <div
       className={expanded ? "preview-modal" : "preview-shell"}
+      ref={dialogRef}
       role={expanded ? "dialog" : undefined}
       aria-modal={expanded ? true : undefined}
       aria-label={expanded ? "Expanded preview" : undefined}

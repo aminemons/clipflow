@@ -71,9 +71,7 @@ export default function EditorTimeline({
   const scrollRef = useRef<HTMLDivElement>(null);
   const timelineRef = useRef<HTMLDivElement>(null);
   const [viewportWidth, setViewportWidth] = useState(760);
-  const trimDrag = useRef<{ id: string; edge: "start" | "end" } | null>(
-    null,
-  );
+  const trimDrag = useRef<{ id: string; edge: "start" | "end" } | null>(null);
   const safeDuration = Math.max(duration, 1);
   const contentWidth = Math.max(
     viewportWidth,
@@ -164,8 +162,10 @@ export default function EditorTimeline({
     let value = edge === "start" ? clip.start : clip.end;
     if (event.key === "ArrowLeft") value -= step;
     else if (event.key === "ArrowRight") value += step;
-    else if (event.key === "Home") value = edge === "start" ? 0 : clip.start + 0.1;
-    else if (event.key === "End") value = edge === "end" ? duration : clip.end - 0.1;
+    else if (event.key === "Home")
+      value = edge === "start" ? 0 : clip.start + 0.1;
+    else if (event.key === "End")
+      value = edge === "end" ? duration : clip.end - 0.1;
     else return;
     event.preventDefault();
     onTrim(

@@ -21,6 +21,7 @@ def value(name: str, default: str = "") -> str:
 
 
 def public_capabilities() -> dict:
+    from .language_models import available, PROVIDERS
     provider = value("CLIPFLOW_TRANSCRIPTION_PROVIDER", "local").lower()
     local = importlib.util.find_spec("faster_whisper") is not None
     configured = (
@@ -80,5 +81,6 @@ def public_capabilities() -> dict:
         "highlights": {
             "provider": value("CLIPFLOW_HIGHLIGHT_PROVIDER", "local"),
             "groq_available": bool(value("GROQ_API_KEY")),
+            "available_providers": [name for name in ("local", "groq", *PROVIDERS) if available(name)],
         },
     }

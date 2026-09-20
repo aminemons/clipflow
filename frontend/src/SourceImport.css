@@ -89,9 +89,14 @@
 .source-link-form input {
   min-width: 0;
 }
+.source-link-actions {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+}
 .source-import-submit {
   display: flex;
-  width: 100%;
+  flex: 1;
   justify-content: center;
   align-items: center;
   gap: 8px;
@@ -101,6 +106,82 @@
   background: #2d2838;
   color: white;
   font-size: 13px;
+}
+.source-import-submit:hover:enabled {
+  background: #3b3449;
+}
+.source-import-cancel {
+  flex: 0 0 auto;
+  padding: 0 13px;
+  border: 1px solid #d8d1e7;
+  border-radius: 8px;
+  background: #fff;
+  color: #625a70;
+  font-size: 12px;
+}
+.source-import-cancel:hover {
+  background: #f0edf5;
+}
+.source-video-details {
+  margin-top: 16px;
+  padding: 15px;
+  border: 1px solid #ddd6ea;
+  border-radius: 10px;
+  background: #fff;
+}
+.source-video-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.source-video-heading h3 {
+  margin: 0;
+  color: #302b3b;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+.source-video-heading p {
+  margin: 5px 0 0;
+  color: #776e85;
+  font-size: 11px;
+}
+.source-edit-link {
+  flex: 0 0 auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #67519a;
+  font: inherit;
+  font-size: 12px;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.source-edit-link:hover {
+  color: #4d397d;
+}
+.source-quality-field {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-top: 14px;
+  color: #655c74;
+  font-size: 12px;
+}
+.source-quality-field select {
+  width: 100%;
+  min-height: 38px;
+  padding: 0 10px;
+  border: 1px solid #d8d1e7;
+  border-radius: 7px;
+  background: #fff;
+  color: #302b3b;
+  font: inherit;
+}
+.source-import-video {
+  margin-top: 12px;
 }
 .source-import-choices button:disabled {
   opacity: 0.5;
@@ -120,6 +201,16 @@
 .source-import-error {
   color: #ac3f45;
 }
+.source-import-footer {
+  margin: 16px 0 0;
+  color: #7e758a;
+  font-size: 11px;
+  line-height: 1.5;
+}
+.source-import-footer strong {
+  color: #665485;
+  font-weight: 600;
+}
 .new-project-retained {
   padding-top: 15px;
   border-top: 1px solid #e4dfee;
@@ -138,5 +229,12 @@
   }
   .new-project-dialog {
     padding: 20px;
+  }
+  .source-video-heading {
+    flex-direction: column;
+    gap: 7px;
+  }
+  .source-edit-link {
+    align-self: flex-start;
   }
 }

@@ -1,6 +1,9 @@
 import { useEffect, useState } from "react";
 import { X } from "lucide-react";
-import type { Health, ProviderSettings as ProviderSettingsType } from "./editorTypes";
+import type {
+  Health,
+  ProviderSettings as ProviderSettingsType,
+} from "./editorTypes";
 
 type Api = <T>(path: string, init?: RequestInit) => Promise<T>;
 
@@ -10,12 +13,14 @@ export default function ProviderSettings({
   onClose,
   onHealth,
   onNotice,
+  embedded = false,
 }: {
   api: Api;
   open: boolean;
   onClose: () => void;
   onHealth: (health: Health) => void;
   onNotice: (message: string) => void;
+  embedded?: boolean;
 }) {
   const empty: ProviderSettingsType = {
     transcription_provider: "local",
@@ -26,7 +31,7 @@ export default function ProviderSettings({
     keys: { GROQ_API_KEY: false, HF_API_KEY: false, HF_API_SECRET: false },
   };
   const [form, setForm] = useState<ProviderSettingsType>(empty);
-  const [credentials, setCredentials] = useState({
+  const [credentials, setCredentials] = useState<Record<string, string>>({
     GROQ_API_KEY: "",
     HF_API_KEY: "",
     HF_API_SECRET: "",
@@ -45,16 +50,13 @@ export default function ProviderSettings({
       );
   }, [open]);
   useEffect(() => {
-    if (!open) return;
+    if (!open || embedded) return;
     const onKey = (event: KeyboardEvent) => event.key === "Escape" && onClose();
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
   if (!open) return null;
-  function setCredential(
-    key: "GROQ_API_KEY" | "HF_API_KEY" | "HF_API_SECRET",
-    value: string,
-  ) {
+  function setCredential(key: string, value: string) {
     setCredentials((current) => ({ ...current, [key]: value }));
     setClearKeys((keys) => keys.filter((item) => item !== key));
   }
@@ -66,6 +68,10 @@ export default function ProviderSettings({
         transcription_provider: form.transcription_provider,
         whisper_model: form.whisper_model,
         highlight_provider: form.highlight_provider,
+        openai_text_model: form.openai_text_model,
+        anthropic_text_model: form.anthropic_text_model,
+        gemini_text_model: form.gemini_text_model,
+        ollama_text_model: form.ollama_text_model,
         groq_highlight_model: form.groq_highlight_model,
         higgsfield_enabled: form.higgsfield_enabled,
         credentials: Object.fromEntries(
@@ -82,7 +88,7 @@ export default function ProviderSettings({
       setClearKeys([]);
       onHealth(await api<Health>("/health"));
       onNotice("Provider settings saved");
-      onClose();
+      if (!embedded) onClose();
     } catch (error) {
       setError(
         error instanceof Error
@@ -95,14 +101,16 @@ export default function ProviderSettings({
   }
   const cloud =
     form.transcription_provider === "groq" ||
-    form.highlight_provider === "groq";
+    !["local", "ollama"].includes(form.highlight_provider);
   return (
     <div
-      className="settings-modal"
-      role="dialog"
-      aria-modal="true"
+      className={embedded ? "settings-embedded" : "settings-modal"}
+      role={embedded ? undefined : "dialog"}
+      aria-modal={embedded ? undefined : true}
       aria-label="Provider settings"
-      onMouseDown={(event) => event.target === event.currentTarget && onClose()}
+      onMouseDown={(event) =>
+        !embedded && event.target === event.currentTarget && onClose()
+      }
     >
       <aside className="settings-drawer">
         <div className="settings-drawer-head">
@@ -110,13 +118,15 @@ export default function ProviderSettings({
             <div className="pane-title">Provider settings</div>
             <p>Choose where analysis runs. Blank credentials stay unchanged.</p>
           </div>
-          <button
-            className="icon-button"
-            aria-label="Close settings"
-            onClick={onClose}
-          >
-            <X size={17} />
-          </button>
+          {!embedded && (
+            <button
+              className="icon-button"
+              aria-label="Close settings"
+              onClick={onClose}
+            >
+              <X size={17} />
+            </button>
+          )}
         </div>
         <label className="settings-field">
           Transcription provider
@@ -169,12 +179,17 @@ export default function ProviderSettings({
             onChange={(event) =>
               setForm({
                 ...form,
-                highlight_provider: event.target.value as "local" | "groq",
+                highlight_provider: event.target
+                  .value as ProviderSettingsType["highlight_provider"],
               })
             }
           >
-            <option value="local">Local ranking</option>
+            <option value="local">Free local ranking</option>
             <option value="groq">Groq</option>
+            <option value="openai">OpenAI</option>
+            <option value="anthropic">Claude</option>
+            <option value="gemini">Gemini</option>
+            <option value="ollama">Ollama · on this computer</option>
           </select>
         </label>
         {cloud && (
@@ -184,7 +199,50 @@ export default function ProviderSettings({
           </p>
         )}
         <div className="settings-divider" />
-        <div className="settings-subtitle">Credentials</div>
+        <div className="settings-subtitle">Text analysis models</div>
+        <p className="page-hint">
+          These models select transcript highlights. Speech recognition uses the
+          transcription provider above. Ollama runs on this computer after you
+          install it and download a model.
+        </p>
+        {(
+          [
+            ["openai_text_model", "OpenAI", "OPENAI_API_KEY"],
+            ["anthropic_text_model", "Claude", "ANTHROPIC_API_KEY"],
+            ["gemini_text_model", "Gemini", "GEMINI_API_KEY"],
+            ["ollama_text_model", "Ollama", null],
+          ] as const
+        ).map(([field, label, key]) => (
+          <div className="model-provider-row" key={field}>
+            <label className="settings-field">
+              {label} model ID
+              <input
+                value={form[field] || ""}
+                maxLength={150}
+                onChange={(e) => setForm({ ...form, [field]: e.target.value })}
+              />
+            </label>
+            {key && (
+              <CredentialField
+                label={`${label} API key`}
+                name={key}
+                present={!!form.keys[key]}
+                value={credentials[key] || ""}
+                onChange={setCredential}
+                clear={clearKeys.includes(key)}
+                onClear={() =>
+                  setClearKeys((current) =>
+                    current.includes(key)
+                      ? current.filter((k) => k !== key)
+                      : [...current, key],
+                  )
+                }
+              />
+            )}
+          </div>
+        ))}
+        <div className="settings-divider" />
+        <div className="settings-subtitle">Speech and video credentials</div>
         <CredentialField
           label="Groq API key"
           name="GROQ_API_KEY"
@@ -262,13 +320,10 @@ function CredentialField({
   onClear,
 }: {
   label: string;
-  name: "GROQ_API_KEY" | "HF_API_KEY" | "HF_API_SECRET";
+  name: string;
   present: boolean;
   value: string;
-  onChange: (
-    name: "GROQ_API_KEY" | "HF_API_KEY" | "HF_API_SECRET",
-    value: string,
-  ) => void;
+  onChange: (name: string, value: string) => void;
   clear: boolean;
   onClear: () => void;
 }) {

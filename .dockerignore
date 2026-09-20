@@ -1,11 +1,17 @@
 .git
 .venv
+build
+desktop
 **/__pycache__
 **/.pytest_cache
 frontend/node_modules
 frontend/dist
+backend/tests
+tests
+docs
 data
 *.log
+*.zip
 .env
 .env.*
 !.env.example

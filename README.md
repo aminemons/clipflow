@@ -4,6 +4,30 @@ Clipflow is a local-first video editor for turning a long 16:9 video into editab
 
 The core path uses FFmpeg/FFprobe, OpenCV, and yt-dlp. Segmentation combines scene changes and silence when those signals are available. Reframing follows a detected focus point with smoothing and falls back safely when detection is unavailable. The result is a practical local baseline, not a claim of semantic “viral moment” detection.
 
+## Workspace
+
+Importing a source never starts clipping. For YouTube, choose **Check video**, review its details, choose a download quality, then import. **Clip setup** guides you through moments (suggested, full source, or manual ranges), camera framing, captions and audio. The final **Generate clips** button runs one job that applies those choices to every new clip. Existing clips and exports are preserved. Open **Edit clips**, select a result, and adjust its timing, camera path, captions or audio independently. Camera paths are evaluated during proof/export rendering; render a proof to check the actual result.
+
+Under **Settings > Publishing**, add named YouTube, Instagram and TikTok accounts. Approve rendered exports, select individual destination accounts, then review the account list, privacy and captions before confirming a post. Configuring accounts does not publish anything. Providers require their OAuth credentials and platform-specific access; Instagram/TikTok also need a publicly reachable media URL.
+
+- **Projects** opens the media library. Start a new project from a file or YouTube link, search names or tags, favorite frequently used sources, switch between grid and list, and rename or archive projects. Archive is reversible and keeps every source, edit, and export.
+- **Editor** separates Clipping, Layout, Captions, and Audio controls. The clip being edited is independent of the export checkboxes. Zoom the timeline, adjust boundaries, expand playback, review candidates, and export one clip or a selection.
+- **Exports** keeps finished versions and job activity together, with project filters, playable MP4 previews, downloads, cancellation, errors, and retry controls.
+- **Publish** lets you approve one or all rendered clips, choose destinations and post text, then confirm the exact files before sending. Editing or re-exporting invalidates approval. YouTube, Instagram and TikTok require their platform credentials and permissions; see [publishing setup](docs/PUBLISHING.md).
+- **Settings** contains optional provider keys, processing preferences, storage usage, preview cleanup, and help. A first-visit walkthrough highlights the actual controls; replay the whole tour here or from the sidebar.
+
+Layouts support 9:16, 1:1, 4:5, and 16:9 output with subject following, manual focus, fit, or a blurred background. The resolution selector reports the final dimensions. Source playback approximates framing; **Render proof** runs the same rendering pipeline used by export.
+
+Caption styles include reusable presets and custom styles saved in this browser. Apply a style to one clip or all clips, drag caption position, or enter X/Y coordinates. Import SRT/WebVTT files with **source-video timestamps** to replace the source transcript after confirmation; existing clip-specific corrections and manual overlays are retained. Subtitle import does not run speech recognition or require a key.
+
+Reference research and implementation choices are recorded in [docs/NEW-REFERENCES.md](docs/NEW-REFERENCES.md) and [docs/WORKSPACE-REBUILD.md](docs/WORKSPACE-REBUILD.md). Reference code and their branding were not copied.
+
+Smart camera controls in **Editor → Layout** provide steady, smooth and dynamic movement, a tracking dead zone, zoom, and source-time keyframes for camera position. The renderer uses face detection, motion fallback and bounded movement. Review the rendered proof before exporting; source playback does not simulate the tracking path. See [camera behavior](docs/SMART-CAMERA.md).
+
+Optional OpenAI, Claude, Gemini, Groq and local Ollama models rank transcript highlight candidates. Local ranking requires no service. Configure editable model IDs and keys under **Settings → Processing & providers**; hosted choices send candidate transcript text to the selected provider and may incur provider charges. They do not change the local video rendering pipeline. Whisper remains the offline speech option; models download once and can then run without network access.
+
+The sidebar's **Download desktop** serves the Windows portable ZIP when a build is present. Extract it and run `Clipflow.exe`. Desktop build and offline requirements are in [docs/DESKTOP.md](docs/DESKTOP.md). Web deployment remains optional; this workspace runs locally.
+
 ## Quick start on Windows
 
 Install these prerequisites first:

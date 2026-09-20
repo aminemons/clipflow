@@ -107,6 +107,41 @@ def test_missing_large_model_fails_before_download(monkeypatch, tmp_path):
         )
 
 
+def test_model_readiness_reports_cached_models_and_free_space(monkeypatch, tmp_path):
+    cache = tmp_path / "models"
+    (cache / "faster-whisper-tiny").mkdir(parents=True)
+    (cache / "faster-whisper-tiny" / "model.bin").write_bytes(b"cached")
+    monkeypatch.setenv("CLIPFLOW_MODEL_CACHE", str(cache))
+    monkeypatch.setattr(
+        transcription.shutil,
+        "disk_usage",
+        lambda *_: SimpleNamespace(free=200 * 1024 * 1024, total=1, used=1),
+    )
+    readiness = transcription.model_readiness(
+        tmp_path / "audio.wav", {"provider": "local", "quality": "auto"}
+    )
+    assert readiness["cached_models"] == ["tiny"]
+    assert readiness["selected_model"] == "tiny"
+    assert readiness["ready"] is True
+    assert "quality may be lower" in readiness["warning"]
+    assert readiness["free_bytes"] == 200 * 1024 * 1024
+
+
+def test_model_readiness_never_downgrades_explicit_accurate(monkeypatch, tmp_path):
+    monkeypatch.setenv("CLIPFLOW_MODEL_CACHE", str(tmp_path / "models"))
+    monkeypatch.setattr(
+        transcription.shutil,
+        "disk_usage",
+        lambda *_: SimpleNamespace(free=300 * 1024 * 1024, total=1, used=1),
+    )
+    readiness = transcription.model_readiness(
+        tmp_path / "audio.wav", {"provider": "local", "quality": "accurate"}
+    )
+    assert readiness["requested_model"] == "large-v3"
+    assert readiness["selected_model"] is None
+    assert readiness["automatic"] is False
+
+
 def test_mkl_memory_error_clears_model_cache_and_is_actionable(monkeypatch, tmp_path):
     class Model:
         def __init__(self, *args, **kwargs):

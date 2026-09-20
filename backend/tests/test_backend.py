@@ -34,6 +34,11 @@ def test_demo_analyze_and_srt():
     job = client.post("/api/projects/demo", json={"target_duration": 6}).json()
     result = wait_job(job["id"])
     assert result["status"] == "done", result
+    analysis = client.post(
+        f"/api/projects/{result['project_id']}/analyze", json={"target_duration": 6}
+    ).json()
+    analyzed = wait_job(analysis["id"])
+    assert analyzed["status"] == "done", analyzed
     project = client.get(f"/api/projects/{result['project_id']}").json()
     assert project["duration"] >= 11
     assert project["clips"]
@@ -96,6 +101,10 @@ def test_caption_burn_in_renders_visible_pixels(tmp_path: Path):
 def test_caption_export_job_is_downloadable():
     created = client.post("/api/projects/demo", json={"target_duration": 6}).json()
     analyzed = wait_job(created["id"])
+    analysis = client.post(
+        f"/api/projects/{analyzed['project_id']}/analyze", json={"target_duration": 6}
+    ).json()
+    analyzed = wait_job(analysis["id"])
     project = client.get(f"/api/projects/{analyzed['project_id']}").json()
     clip = project["clips"][0]
     edited = client.patch(

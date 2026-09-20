@@ -27,7 +27,7 @@ export default function ClipEnhancements({
   disabled,
   onChange,
 }: Props) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(true);
   const [fadeDraft, setFadeDraft] = useState(String(audio_fade));
   useEffect(() => setFadeDraft(String(audio_fade)), [audio_fade]);
   const outputDuration =

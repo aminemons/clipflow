@@ -1,0 +1,222 @@
+.publishing-settings {
+  display: grid;
+  gap: 18px;
+  max-width: 980px;
+}
+.publishing-settings-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+}
+.publishing-settings-heading h2 {
+  margin: 0 0 6px;
+}
+.publishing-settings-heading p {
+  margin: 0;
+  color: var(--muted, #6d7467);
+  max-width: 650px;
+}
+.publishing-provider-card {
+  border: 1px solid var(--line, #dfe3d5);
+  border-radius: 18px;
+  background: var(--panel, #fff);
+  padding: 20px;
+  box-shadow: 0 8px 24px #2632150a;
+}
+.publishing-provider-card header {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  border-bottom: 1px solid var(--line, #dfe3d5);
+  padding-bottom: 15px;
+}
+.publishing-provider-card header > div {
+  flex: 1;
+}
+.publishing-provider-card h3 {
+  margin: 0 0 5px;
+}
+.publishing-provider-card header p {
+  margin: 0;
+  color: var(--muted, #6d7467);
+  font-size: 14px;
+  line-height: 1.45;
+}
+.publishing-status {
+  white-space: nowrap;
+  border-radius: 999px;
+  padding: 5px 10px;
+  font-size: 12px;
+  font-weight: 700;
+}
+.publishing-status.is-ready {
+  background: #e8f5d2;
+  color: #37610d;
+}
+.publishing-status.is-muted {
+  background: #f0f2ed;
+  color: #6d7467;
+}
+.publishing-toggle {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 650;
+}
+.publishing-toggle input,
+.publishing-checks input {
+  accent-color: #719a31;
+}
+.publishing-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 15px;
+  margin-top: 17px;
+}
+.publishing-field {
+  display: grid;
+  gap: 6px;
+  color: #3e4938;
+  font-size: 13px;
+  font-weight: 650;
+}
+.publishing-field input,
+.publishing-field select {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid #d4dac9;
+  border-radius: 9px;
+  background: #fbfcf8;
+  color: #26301f;
+  padding: 10px 11px;
+  font: inherit;
+  font-weight: 400;
+}
+.publishing-field small {
+  font-size: 11px;
+  color: #7c8477;
+  font-weight: 400;
+  line-height: 1.35;
+}
+.publishing-doc-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 16px;
+  color: #4f7620;
+  font-size: 13px;
+  font-weight: 650;
+  text-decoration: none;
+}
+.publishing-doc-link:hover {
+  text-decoration: underline;
+}
+.publishing-checks {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  flex-wrap: wrap;
+  grid-column: 1/-1;
+  color: #4f5c49;
+  font-size: 13px;
+}
+.publishing-checks label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.publishing-policy-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  color: #66715e;
+  font-size: 13px;
+  line-height: 1.4;
+  margin: 16px 0 0;
+}
+.publishing-policy-note svg {
+  flex: 0 0 auto;
+  color: #658d2b;
+  margin-top: 1px;
+}
+.publishing-notes {
+  font-size: 12px;
+  color: #747b70;
+  line-height: 1.5;
+  margin: 0;
+}
+.publishing-settings .workspace-error {
+  margin: 0;
+}
+.publishing-settings .primary-action {
+  white-space: nowrap;
+}
+.publishing-account {
+  border-top: 1px solid var(--line, #dfe3d5);
+  margin-top: 17px;
+  padding-top: 17px;
+}
+.publishing-account-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.publishing-account-heading > div {
+  display: grid;
+  gap: 3px;
+  flex: 1;
+  min-width: 0;
+}
+.publishing-account-heading small {
+  color: var(--muted, #6d7467);
+  font-size: 11px;
+}
+.publishing-empty-account {
+  color: var(--muted, #6d7467);
+  font-size: 13px;
+  margin: 18px 0 0;
+}
+.icon-action {
+  border: 1px solid var(--line, #dfe3d5);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted, #6d7467);
+  padding: 7px;
+}
+.icon-action:hover { color: #a34343; border-color: #d8aaaa; }
+.publishing-account .publishing-fields { margin-top: 13px; }
+@media (max-width: 760px) {
+  .publishing-settings-heading {
+    display: grid;
+  }
+  .publishing-fields {
+    grid-template-columns: 1fr;
+  }
+  .publishing-provider-card header {
+    flex-wrap: wrap;
+  }
+  .publishing-provider-card header > div {
+    min-width: 100%;
+  }
+}
+
+.publishing-provider-card {
+  border-radius: 8px;
+  box-shadow: none;
+}
+.publishing-field {
+  color: var(--text);
+}
+.publishing-field input,
+.publishing-field select {
+  background: #fff;
+  border-color: var(--line);
+  color: var(--text);
+  border-radius: 6px;
+}
+.publishing-doc-link {
+  color: var(--accent);
+}

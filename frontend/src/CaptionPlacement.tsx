@@ -50,12 +50,7 @@ function CoordinateInput({
   );
 }
 
-export default function CaptionPlacement({
-  x,
-  y,
-  disabled,
-  onChange,
-}: Props) {
+export default function CaptionPlacement({ x, y, disabled, onChange }: Props) {
   return (
     <div className="caption-placement" aria-label="Precise caption placement">
       <div className="caption-placement-heading">

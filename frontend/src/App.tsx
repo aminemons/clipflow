@@ -1,10 +1,4 @@
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Activity,
   AlignCenter,
@@ -43,6 +37,8 @@ import {
   MoreHorizontal,
   MoveHorizontal,
   Palette,
+  Pencil,
+  Save,
   PanelRight,
   Play,
   Plus,
@@ -71,8 +67,19 @@ import { SourceImport, NewProjectDialog } from "./SourceImport";
 import CaptionPlacement from "./CaptionPlacement";
 import PreviewPlayer from "./PreviewPlayer";
 import ProviderSettings from "./ProviderSettings";
+import PublishPage from "./PublishPage";
+import PublishingSettings from "./PublishingSettings";
+import CameraControls from "./CameraControls";
+import ClipSetup, { type ClipSetupSettings } from "./ClipSetup";
+import WorkspaceNav from "./WorkspaceNav";
+import ProjectsPage, { type ProjectChanges } from "./ProjectsPage";
+import ExportsPage from "./ExportsPage";
+import SettingsPage from "./SettingsPage";
+import GuidedTour, { type TourPage } from "./GuidedTour";
+import CaptionPresets from "./CaptionPresets";
+import { parseSubtitles } from "./subtitleImport";
+import "./workspace.css";
 import type {
-  AnalysisOptions,
   Clip,
   Health,
   Job,
@@ -121,7 +128,8 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
       throw new Error(
         typeof parsed.detail === "string"
           ? parsed.detail
-          : `Check your input (HTTP ${response.status}).`,
+          : parsed.detail?.message ||
+            `Check your input (HTTP ${response.status}).`,
       );
     } catch (error) {
       if (error instanceof SyntaxError)
@@ -141,7 +149,25 @@ const historyKey = (projectId: string) => `clipflow-edit-history-${projectId}`;
 const clipFingerprint = (items: Clip[]) =>
   items.map((clip) => `${clip.id}:${clip.revision || 0}`).join("|");
 
+function routePage(): TourPage {
+  const value = window.location.hash.split("/")[1];
+  return ["projects", "editor", "exports", "publish", "settings"].includes(
+    value,
+  )
+    ? (value as TourPage)
+    : "projects";
+}
 export default function App() {
+  const [page, setPage] = useState<TourPage>(routePage);
+  const [settingsSection, setSettingsSection] = useState("processing");
+  const [navCompact, setNavCompact] = useState(false);
+  const [tourReplay, setTourReplay] = useState(0);
+  const [inspector, setInspector] = useState<
+    "clipping" | "layout" | "captions" | "audio"
+  >("clipping");
+  const [subtitleDraft, setSubtitleDraft] = useState<
+    { start: number; end: number; text: string }[] | null
+  >(null);
   const [health, setHealth] = useState<Health>({});
   const [projects, setProjects] = useState<Project[]>([]);
   const [project, setProject] = useState<Project | null>(null);
@@ -161,7 +187,7 @@ export default function App() {
   const [playing, setPlaying] = useState(false);
   const [search, setSearch] = useState("");
   const [clipFilter, setClipFilter] = useState<
-    "all" | "drafts" | "reviewed" | "exported"
+    "all" | "smart" | "drafts" | "reviewed" | "exported"
   >("all");
   const [restoreAvailable, setRestoreAvailable] = useState(false);
   const [brandColor, setBrandColor] = useState(
@@ -182,36 +208,28 @@ export default function App() {
     "A quiet travel detail, soft movement, natural light",
   );
   const [generationDuration, setGenerationDuration] = useState<5 | 10>(5);
-  const [analysisMode, setAnalysisMode] = useState<"full" | "smart">("full");
-  const [analysisTolerance, setAnalysisTolerance] = useState(0.3);
-  const [analysisStrictMax, setAnalysisStrictMax] = useState<number | null>(
-    null,
-  );
-  const [analysisMaxClips, setAnalysisMaxClips] = useState(5);
-  const [analysisTopic, setAnalysisTopic] = useState("");
-  const [analysisUseTranscript, setAnalysisUseTranscript] = useState(true);
-  const [analysisProvider, setAnalysisProvider] = useState<"local" | "groq">(
-    "local",
-  );
+  const [showSetup, setShowSetup] = useState(false);
+  const [analysisSubmitting, setAnalysisSubmitting] = useState(false);
+  const inspectorContent = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    // Each tool opens at its first decision, not at the previous tool's scroll position.
+    if (inspectorContent.current) inspectorContent.current.scrollTop = 0;
+  }, [inspector, project?.id]);
   const [expandedPreview, setExpandedPreview] = useState(false);
-  const [workspaceMode, setWorkspaceMode] = useState<"edit" | "review">(
-    "edit",
-  );
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [workspaceMode, setWorkspaceMode] = useState<"edit" | "review">("edit");
+  const settingsOpen = page === "settings";
+  const setSettingsOpen = (open: boolean) => {
+    if (open) void navigatePage("settings");
+  };
   const [newProjectOpen, setNewProjectOpen] = useState(false);
   const [importSubmitting, setImportSubmitting] = useState(false);
-  const [saveState, setSaveState] = useState<"saved" | "saving" | "error">(
+  const [saveState, setSaveState] = useState<"saved" | "dirty" | "saving" | "error">(
     "saved",
   );
   const [saveError, setSaveError] = useState("");
   const importInFlight = useRef(false);
   const importJobId = useRef("");
   const openRequestId = useRef(0);
-  useEffect(() => {
-    setAnalysisProvider(
-      health?.configuration?.highlights?.provider === "groq" ? "groq" : "local",
-    );
-  }, [health?.configuration?.highlights?.provider]);
   const proofJobId = useRef("");
   const videoRef = useRef<HTMLVideoElement>(null);
   const pendingSourceSeek = useRef<number | null>(null);
@@ -219,24 +237,28 @@ export default function App() {
   const loadProjectOnDone = useRef(false);
   const pendingSaves = useRef<Set<Promise<unknown>>>(new Set());
   const saveChains = useRef<Record<string, Promise<unknown>>>({});
-  const debouncedSaves = useRef<Record<string, {
-    patch: Partial<Clip>;
-    version: number;
-    timer: number;
-    promise: Promise<void>;
-    resolve: () => void;
-    failed?: boolean;
-    error?: string;
-  }>>({});
+  const debouncedSaves = useRef<
+    Record<
+      string,
+      {
+        patch: Partial<Clip>;
+        version: number;
+        failed?: boolean;
+        error?: string;
+      }
+    >
+  >({});
   const resumed = useRef(false);
 
   // Restore the working clip after a refresh without changing export checkboxes.
   useEffect(() => {
     if (resumed.current || !projects.length) return;
     resumed.current = true;
-    const last = localStorage.getItem("clipflow-current-project");
-    if (last && projects.some((item) => item.id === last))
-      void openProject(last);
+    const last = window.location.hash.startsWith("#/editor/")
+      ? window.location.hash.split("/")[2]
+      : localStorage.getItem("clipflow-current-project");
+    if (last && projects.some((item) => item.id === last && !item.archived))
+      void openProject(last, false);
   }, [projects]);
   useEffect(() => {
     if (!project) return;
@@ -261,7 +283,10 @@ export default function App() {
   }, [project?.id, clips, history, future]);
   useEffect(() => {
     const warnBeforeLeave = (event: BeforeUnloadEvent) => {
-      if (!pendingSaves.current.size && !Object.keys(debouncedSaves.current).length)
+      if (
+        !pendingSaves.current.size &&
+        !Object.keys(debouncedSaves.current).length
+      )
         return;
       event.preventDefault();
       event.returnValue = "";
@@ -271,7 +296,6 @@ export default function App() {
   }, []);
 
   const selected = clips.find((c) => c.id === selectedId) ?? clips[0];
-  const smoothingEnabled = !!selected && (selected.smoothing ?? 0) > 0;
   const duration = project?.duration || 0;
   const isBusy = job?.status === "queued" || job?.status === "running";
 
@@ -304,6 +328,7 @@ export default function App() {
           "youtube_job",
           "demo_job",
           "analyze_job",
+          "generate_clips_job",
           "transcribe_job",
         ].includes(active.kind || "")
       )
@@ -387,6 +412,9 @@ export default function App() {
             // A new source is a separate project; switch only after it is ready.
             openRequestId.current++;
             importJobId.current = "";
+            setInspector("clipping");
+            setShowSetup(true);
+            setNotice("Source imported. Choose how you want to create clips.");
             proofJobId.current = "";
             setProofUrl("");
             setPlaying(false);
@@ -396,9 +424,27 @@ export default function App() {
             setClipFilter("all");
             setSidebar("clips");
             setUrl("");
+            setPage("editor");
+            window.history.pushState(null, "", `#/editor/${loaded.id}`);
           }
           setProject(loaded);
           setClips(nextClips);
+          if (next.kind === "generate_clips_job") {
+            setShowSetup(false);
+            setInspector("layout");
+            setWorkspaceMode("edit");
+            setSidebar("clips");
+            setSearch("");
+            setClipFilter("all");
+            const first = nextClips.find((clip) => clip.generation_id === next.id);
+            if (first) {
+              setActiveTime(first.start);
+              pendingSourceSeek.current = first.start;
+              setTimelineZoom(clamp((loaded.duration / Math.max(first.end - first.start, 1)) * .8, 1, 256));
+            }
+            setProofUrl("");
+            proofJobId.current = "";
+          }
           setRestoreAvailable(Boolean(loaded.can_restore_clips));
           setSelectedId(
             (next.kind === "transcribe_job" &&
@@ -406,15 +452,18 @@ export default function App() {
             nextClips.some((clip) => clip.id === selectedId)
               ? selectedId
               : undefined) ??
+              (next.kind === "generate_clips_job"
+                ? nextClips.find((clip) => clip.generation_id === next.id)?.id
+                : undefined) ??
               nextClips.find((clip) => clip.selected)?.id ??
               nextClips[0]?.id ??
               null,
           );
           refreshProjects();
           setNotice(
-            next.download_url
-              ? "Source ready. Your clips are ready to edit."
-              : "Source ready.",
+            next.kind === "generate_clips_job"
+              ? "Clips generated. Select a clip to adjust its timing, camera or captions."
+              : next.kind === "transcribe_job" ? "Transcription complete." : "Source imported. Configure your clips to continue.",
           );
           setHistory([]);
           setFuture([]);
@@ -432,10 +481,12 @@ export default function App() {
         if (next.status === "error" || next.status === "cancelled") {
           if (importJobId.current === next.id) importJobId.current = "";
           loadProjectOnDone.current = false;
-          if (next.status === "error")
+          if (next.status === "error") {
+            setNotice("");
             setError(
               next.error || "The job failed. Check the source and try again.",
             );
+          }
         }
       } catch (e) {
         setError(
@@ -458,7 +509,12 @@ export default function App() {
   }, [notice]);
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
-      if (newProjectOpen) return;
+      if (
+        newProjectOpen ||
+        page !== "editor" ||
+        document.querySelector("[role=dialog]")
+      )
+        return;
       const target = event.target as HTMLElement;
       const editing = target.matches(
         'input, textarea, select, [contenteditable="true"]',
@@ -540,7 +596,7 @@ export default function App() {
       `Importing ${file.name}`,
     );
   }
-  async function importYoutube() {
+  async function importYoutube(quality: number) {
     if (!url.trim()) return;
     await beginImport(
       () =>
@@ -548,13 +604,13 @@ export default function App() {
           method: "POST",
           body: JSON.stringify({
             url: url.trim(),
-            target_duration: targetDuration,
+            quality,
           }),
         }),
       "Fetching source from YouTube",
     );
   }
-  async function openProject(id: string) {
+  async function openProject(id: string, reveal = true) {
     const requestId = ++openRequestId.current;
     setProofUrl("");
     proofJobId.current = "";
@@ -563,7 +619,17 @@ export default function App() {
       if (!(await flushQueuedSaves())) return;
       const loaded = await api<Project>(`/projects/${id}`);
       if (requestId !== openRequestId.current) return;
+      if (project?.id !== loaded.id) {
+        setSearch("");
+        setClipFilter("all");
+        setSidebar("clips");
+      }
       setProject(loaded);
+      setShowSetup(!loaded.clips?.length);
+      if (reveal) {
+        setPage("editor");
+        window.history.pushState(null, "", `#/editor/${loaded.id}`);
+      }
       setClips(loaded.clips || []);
       setRestoreAvailable(Boolean(loaded.can_restore_clips));
       setSelectedId(
@@ -637,23 +703,18 @@ export default function App() {
     setClips(next);
     void syncClips(next);
   }
-  async function flushQueuedSaves(): Promise<boolean> {
-    if (Object.values(debouncedSaves.current).some((entry) => entry.failed)) {
-      setSaveState("error");
-      setError("Some edits could not be saved. Retry the save before continuing.");
+  // Media edits remain drafts until Save settings; rendering never saves implicitly.
+  async function flushQueuedSaves(saveDrafts = false): Promise<boolean> {
+    if (Object.keys(debouncedSaves.current).length && !saveDrafts) {
+      setNotice("Save settings before leaving or rendering. Your edits are still here.");
       return false;
     }
     const queued = Object.entries(debouncedSaves.current);
-    for (const [id, entry] of queued) {
-      window.clearTimeout(entry.timer);
-      void flushDebouncedSave(id, entry);
-    }
-    await Promise.all([...pendingSaves.current]);
-    if (Object.values(debouncedSaves.current).some((entry) => entry.failed)) {
-      setSaveState("error");
-      setError("Some edits could not be saved. Retry the save before continuing.");
-      return false;
-    }
+    await Promise.all(queued.map(([id, entry]) => flushDebouncedSave(id, entry)));
+    await Promise.allSettled([...pendingSaves.current]);
+    if (Object.keys(debouncedSaves.current).length) return false;
+    setSaveState("saved");
+    setSaveError("");
     return true;
   }
   async function flushDebouncedSave(
@@ -661,101 +722,54 @@ export default function App() {
     entry: {
       patch: Partial<Clip>;
       version: number;
-      timer: number;
-      promise: Promise<void>;
-      resolve: () => void;
       failed?: boolean;
       error?: string;
     },
   ) {
     if (debouncedSaves.current[id] !== entry) return;
-    entry.failed = false;
+    // Detach this snapshot so typing during a request cannot erase later edits.
+    delete debouncedSaves.current[id];
     setSaveState("saving");
     try {
       const saved = await persistClip(id, entry.patch);
       if (saved && patchVersions.current[id] === entry.version)
         setClips((list) => list.map((c) => (c.id === id ? saved : c)));
-      delete debouncedSaves.current[id];
       // Keep a visible retry state for any other clip whose patch failed.
       // A successful retry or an unrelated save must not hide that failure.
       if (!Object.values(debouncedSaves.current).some((item) => item.failed))
         setSaveError("");
     } catch (e) {
-      entry.failed = true;
+      const newer = debouncedSaves.current[id];
       entry.error = e instanceof Error ? e.message : "Could not save this edit.";
+      debouncedSaves.current[id] = { patch: { ...entry.patch, ...newer?.patch },
+        version: newer?.version ?? entry.version, failed: true, error: entry.error };
       setSaveState("error");
       setSaveError(entry.error);
       setError(e instanceof Error ? e.message : "Could not save clip.");
     } finally {
-      pendingSaves.current.delete(entry.promise);
-      entry.resolve();
+      const remaining = Object.values(debouncedSaves.current);
+      setSaveState(remaining.some((item) => item.failed) ? "error" :
+        remaining.length ? "dirty" : pendingSaves.current.size ? "saving" : "saved");
     }
   }
   function retryFailedSaves() {
-    const failed = Object.entries(debouncedSaves.current).filter(
-      ([, entry]) => entry.failed,
-    );
-    if (!failed.length) return;
-    setSaveState("saving");
-    for (const [id, entry] of failed) {
-      let resolve!: () => void;
-      entry.promise = new Promise<void>((done) => {
-        resolve = done;
-      });
-      entry.resolve = resolve;
-      entry.failed = false;
-      pendingSaves.current.add(entry.promise);
-      void flushDebouncedSave(id, entry);
-    }
+    void flushQueuedSaves(true);
   }
   function queueClipSave(id: string, patch: Partial<Clip>, version: number) {
-    setSaveState("saving");
+    setSaveState("dirty");
     if (!Object.values(debouncedSaves.current).some((entry) => entry.failed))
       setSaveError("");
     const existing = debouncedSaves.current[id];
-    if (existing) {
-      existing.patch = { ...existing.patch, ...patch };
-      existing.version = version;
-      window.clearTimeout(existing.timer);
-      existing.timer = window.setTimeout(
-        () => void flushDebouncedSave(id, existing),
-        220,
-      );
-      return;
-    }
-    let resolve!: () => void;
-    const promise = new Promise<void>((done) => {
-      resolve = done;
-    });
-    const entry = {
-      patch: { ...patch },
-      version,
-      timer: 0,
-      promise,
-      resolve,
-    };
-    entry.timer = window.setTimeout(
-      () => void flushDebouncedSave(id, entry),
-      220,
-    );
-    debouncedSaves.current[id] = entry;
-    pendingSaves.current.add(promise);
+    debouncedSaves.current[id] = { patch: { ...existing?.patch, ...patch }, version };
   }
   async function syncClips(next: Clip[]) {
     if (!project) return;
-    try {
-      if (!(await flushQueuedSaves())) return;
-      const saved = await Promise.all(next.map((c) => persistClip(c.id, c)));
-      const byId = new Map(
-        saved.filter((clip): clip is Clip => Boolean(clip)).map((clip) => [clip.id, clip]),
-      );
-      setClips((items) => items.map((clip) => byId.get(clip.id) || clip));
-      setSaveState("saved");
-      setSaveError("");
-    } catch (e) {
-      setSaveState("error");
-      setSaveError(e instanceof Error ? e.message : "Could not save this edit.");
-      setError(e instanceof Error ? e.message : "Could not save this edit.");
+    proofJobId.current = "";
+    setProofUrl("");
+    for (const clip of next) {
+      const version = (patchVersions.current[clip.id] || 0) + 1;
+      patchVersions.current[clip.id] = version;
+      queueClipSave(clip.id, clip, version);
     }
   }
   async function persistClip(
@@ -781,16 +795,27 @@ export default function App() {
       return await request;
     } catch (e) {
       setSaveState("error");
-      setSaveError(e instanceof Error ? e.message : "Could not save this edit.");
+      setSaveError(
+        e instanceof Error ? e.message : "Could not save this edit.",
+      );
       throw e;
     } finally {
       pendingSaves.current.delete(request);
       setSaveState((state) =>
-        state === "saving" && pendingSaves.current.size === 0 ? "saved" : state,
+        state === "saving" && pendingSaves.current.size === 0
+          ? Object.keys(debouncedSaves.current).length ? "dirty" : "saved" : state,
       );
     }
   }
   function patchClip(id: string, patch: Partial<Clip>) {
+    const current = clips.find((clip) => clip.id === id);
+    if (current && Object.entries(patch).every(([key, value]) => current[key as keyof Clip] === value)) return;
+    // Library selection and review are independent of media drafts.
+    if (Object.keys(patch).every((key) => ["selected", "reviewed", "suggestion_status"].includes(key))) {
+      setClips((list) => list.map((c) => c.id === id ? { ...c, ...patch } : c));
+      void persistClip(id, patch).catch((error) => setError(String(error)));
+      return;
+    }
     proofJobId.current = "";
     setProofUrl("");
     snapshot();
@@ -805,18 +830,27 @@ export default function App() {
       setNotice("Import a source to add clips.");
       return;
     }
+    if (isBusy) return;
     try {
+      if (!(await flushQueuedSaves())) return;
+      const start = clamp(activeTime, 0, Math.max(0, duration - 0.1));
       const created = await api<Clip>(`/projects/${project.id}/clips`, {
         method: "POST",
         body: JSON.stringify({
           ...DEFAULT_CLIP,
           title: `Clip ${clips.length + 1}`,
-          end: Math.min(duration, targetDuration),
+          start,
+          end: Math.min(duration, start + targetDuration),
         }),
       });
       setClips((c) => [...c, created]);
       setSelectedId(created.id);
-      setNotice("New clip added");
+      setSearch("");
+      setClipFilter("all");
+      setSidebar("clips");
+      setNotice(
+        "Clip added at the playhead. Drag its timeline handles or set start and end with I and O.",
+      );
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not add clip.");
     }
@@ -896,6 +930,8 @@ export default function App() {
       // The active editor clip is separate from the export selection. Choosing
       // a clip to work on must never silently deselect other export targets.
       setSelectedId(clip.id);
+      setShowSetup(false);
+      setWorkspaceMode("edit");
       setTimelineZoom(
         clamp((duration / Math.max(clip.end - clip.start, 1)) * 0.8, 1, 256),
       );
@@ -942,42 +978,22 @@ export default function App() {
         : { end: clamp(value, selected.start + 0.1, duration) };
     patchClip(selected.id, patch);
   }
-  async function analyze(modeOverride?: "full" | "smart") {
-    if (!project) return;
+  async function generateConfiguredClips(settings: ClipSetupSettings) {
+    if (!project || isBusy || analysisSubmitting) return;
+    setAnalysisSubmitting(true);
+    setError("");
+    setNotice("");
     try {
+      if (!(await flushQueuedSaves())) return;
       loadProjectOnDone.current = true;
-      const options: AnalysisOptions = {
-        mode: modeOverride || analysisMode,
-        targetDuration,
-        tolerance: analysisTolerance,
-        strictMax: analysisStrictMax,
-        maxClips: analysisMaxClips,
-        topic: analysisTopic.trim(),
-        useTranscript: analysisUseTranscript,
-        provider: analysisProvider,
-      };
-      await startJob(
-        await api<Job>(`/projects/${project.id}/analyze`, {
-          method: "POST",
-          body: JSON.stringify({
-            target_duration: options.targetDuration,
-            mode: options.mode,
-            max_clips: options.maxClips,
-            tolerance: options.tolerance,
-            strict_max: options.strictMax,
-            topic: options.topic,
-            use_transcript: options.useTranscript,
-            provider: options.provider,
-          }),
-        }),
-      );
-      setNotice(
-        options.mode === "smart"
-          ? "Ranking a focused subset of clips"
-          : "Analyzing the full video",
-      );
+      await startJob(await api<Job>(`/projects/${project.id}/generate`, {
+        method: "POST", body: JSON.stringify(settings),
+      }));
+      setNotice("Generating clips with your camera, caption and audio settings.");
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Analysis failed.");
+      setError(e instanceof Error ? e.message : "Could not start generation.");
+    } finally {
+      setAnalysisSubmitting(false);
     }
   }
   async function transcribe(
@@ -1040,7 +1056,7 @@ export default function App() {
       });
       setExports((x) => [created, ...x]);
       setJob(created);
-      setSidebar("exports");
+      setSidebar("clips");
       setNotice("Export queued");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Export failed.");
@@ -1078,7 +1094,7 @@ export default function App() {
       });
       setJobs((items) => [created, ...items]);
       setJob(created);
-      setSidebar("exports");
+      setSidebar("clips");
       setNotice(
         "Generation queued. It will open as a new project when ready; provider credits may apply.",
       );
@@ -1111,22 +1127,122 @@ export default function App() {
       clips.filter((c) => {
         const matchesFilter =
           clipFilter === "all" ||
-          (clipFilter === "exported"
-            ? c.status === "exported"
-            : clipFilter === "reviewed"
-              ? !!c.reviewed
-              : c.status !== "exported" && !c.reviewed);
+          (clipFilter === "smart"
+            ? !!c.reason || c.score !== undefined
+            : clipFilter === "exported"
+              ? c.status === "exported"
+              : clipFilter === "reviewed"
+                ? !!c.reviewed
+                : c.status !== "exported" && !c.reviewed);
         return (
           matchesFilter && c.title.toLowerCase().includes(search.toLowerCase())
         );
       }),
     [clips, search, clipFilter],
   );
+  async function navigatePage(next: TourPage) {
+    if (!(await flushQueuedSaves())) return;
+    if (next !== "editor") {
+      videoRef.current?.pause();
+      setExpandedPreview(false);
+    }
+    setPage(next);
+    window.history.pushState(
+      null,
+      "",
+      `#/${next}${next === "editor" && project ? "/" + project.id : ""}`,
+    );
+    if (next === "projects") void refreshProjects();
+    if (next === "exports") void refreshJobs();
+  }
+  useEffect(() => {
+    const changed = async () => {
+      if (!(await flushQueuedSaves())) {
+        window.history.replaceState(
+          null,
+          "",
+          `#/${page}${page === "editor" && project ? "/" + project.id : ""}`,
+        );
+        return;
+      }
+      const next = routePage();
+      if (next !== "editor") {
+        videoRef.current?.pause();
+        setExpandedPreview(false);
+      }
+      setPage(next);
+      const id = window.location.hash.split("/")[2];
+      if (next === "editor" && id && id !== project?.id)
+        void openProject(id, false);
+    };
+    window.addEventListener("hashchange", changed);
+    window.addEventListener("popstate", changed);
+    return () => {
+      window.removeEventListener("hashchange", changed);
+      window.removeEventListener("popstate", changed);
+    };
+  }, [project?.id, page]);
+  async function updateProject(id: string, changes: ProjectChanges) {
+    if (!(await flushQueuedSaves()))
+      throw new Error("Save your current changes before updating a project.");
+    const updated = await api<Project>(`/projects/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(changes),
+    });
+    setProjects((items) => items.map((p) => (p.id === id ? updated : p)));
+    if (project?.id === id) {
+      setProject(updated);
+      if (updated.archived) {
+        setProject(null);
+        setClips([]);
+        setSelectedId(null);
+        localStorage.removeItem("clipflow-current-project");
+      }
+    }
+    if (changes.archived !== undefined)
+      setNotice(
+        changes.archived
+          ? "Project archived. Restore it from Archived."
+          : "Project restored.",
+      );
+  }
+  async function importSubtitles(file?: File) {
+    if (!file || !project) return;
+    try {
+      if (file.size > 2_000_000)
+        throw new Error("Subtitle files must be smaller than 2 MB.");
+      setSubtitleDraft(parseSubtitles(await file.text(), duration));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not read subtitles.");
+    }
+  }
+  async function applySubtitles() {
+    if (!project || !subtitleDraft || !(await flushQueuedSaves())) return;
+    try {
+      const updated = await api<Project>(
+        `/projects/${project.id}/transcript/import`,
+        { method: "POST", body: JSON.stringify({ segments: subtitleDraft }) },
+      );
+      setProject(updated);
+      setClips(updated.clips);
+      setSubtitleDraft(null);
+      setProofUrl("");
+      setHistory([]);
+      setFuture([]);
+      setSidebar("transcript");
+      setNotice(
+        "Source subtitles imported. Clip-specific corrections and manual overlays are preserved.",
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not save subtitles.");
+    }
+  }
+
   const selectedCount = clips.filter((c) => c.selected).length;
 
   return (
     <div
-      className={`studio-shell workspace-${workspaceMode}`}
+      className={`application-shell ${navCompact ? "navigation-collapsed" : ""}`}
       onDragOver={(e) => {
         e.preventDefault();
         setDragging(true);
@@ -1138,969 +1254,1158 @@ export default function App() {
         importFile(e.dataTransfer.files[0]);
       }}
     >
-      <header className="studio-header">
-        <div className="brand-mark">
-          <span className="brand-symbol">◒</span>
-          <span>clipflow</span>
-        </div>
-        <div className="header-context">
-          {project ? (
-            <>
-              <span className="status-dot" /> Editing{" "}
-              <strong>{project.title}</strong>
-            </>
-          ) : (
-            <>
-              <span className="status-dot idle" /> Your private edit studio
-            </>
-          )}
-          <span className={`save-status ${saveState}`} role="status">
-            <span className="save-status-dot" />
-            {saveState === "saving"
-              ? saveError
-                ? "Saving… · previous error"
-                : "Saving…"
-              : saveState === "error"
-                ? "Save failed"
-                : "Saved"}
-          </span>
-          {saveError && (
-            <button
-              className="save-status-detail"
-              title={saveError}
-              onClick={retryFailedSaves}
-            >
-              Retry save
-            </button>
-          )}
-        </div>
-        <div className="workspace-toggle" role="tablist" aria-label="Workspace mode">
-          <button
-            role="tab"
-            aria-selected={workspaceMode === "edit"}
-            className={workspaceMode === "edit" ? "active" : ""}
-            onClick={() => setWorkspaceMode("edit")}
-          >
-            Edit
-          </button>
-          <button
-            role="tab"
-            aria-selected={workspaceMode === "review"}
-            className={workspaceMode === "review" ? "active" : ""}
-            onClick={() => setWorkspaceMode("review")}
-          >
-            Review
-          </button>
-        </div>
-        <div className="header-actions">
-          <button
-            className="new-project-trigger"
-            onClick={() => {
+      <WorkspaceNav
+        page={page}
+        onNavigate={navigatePage}
+        onNew={() => {
+          setError("");
+          setNewProjectOpen(true);
+        }}
+        onTour={() => setTourReplay((n) => n + 1)}
+        hasProject={!!project}
+        projectTitle={project?.title}
+        compact={navCompact}
+        onCompact={() => setNavCompact((v) => !v)}
+        activeJobs={
+          jobs.filter((j) => ["running", "queued"].includes(j.status)).length
+        }
+      />
+      <div className="workspace-route">
+        {page === "projects" && (
+          <ProjectsPage
+            projects={projects.map((p) =>
+              p.id === project?.id ? { ...p, clips } : p,
+            )}
+            jobs={jobs}
+            currentId={project?.id}
+            onOpen={openProject}
+            onNew={() => {
               setError("");
               setNewProjectOpen(true);
             }}
-          >
-            <Plus size={16} /> New project
-          </button>
-          <button
-            className="icon-button"
-            title="Undo"
-            aria-label="Undo"
-            onClick={undo}
-            disabled={!history.length}
-          >
-            <Undo2 size={16} />
-          </button>
-          <button
-            className="icon-button"
-            title="Redo"
-            aria-label="Redo"
-            onClick={redo}
-            disabled={!future.length}
-          >
-            <Redo2 size={16} />
-          </button>
-          <span className="header-divider" />
-          <button
-            className="icon-button"
-            title="Settings"
-            aria-label="Open provider settings"
-            onClick={() => setSettingsOpen(true)}
-          >
-            <Settings2 size={16} />
-          </button>
-          <button
-            className="quiet-button"
-            onClick={() =>
-              setNotice(
-                "Your source stays in this workspace until you export or connect a provider.",
-              )
-            }
-          >
-            <ShieldCheck size={15} /> Private workspace
-          </button>
-        </div>
-      </header>
-      <div className="workspace">
-        <aside className="left-panel">
-          <div className="panel-top">
-            <div className="eyebrow">SOURCE</div>
-          </div>
-          {projects.length > 0 && (
-            <details className="project-history" open={!project}>
-              <summary className="history-label">
-                <History size={13} /> Your sources · {projects.length}
-              </summary>
-              <div className="source-history-list">
-                {projects.map((item) => (
-                  <button
-                    key={item.id}
-                    className={`project-history-row ${item.id === project?.id ? "current" : ""}`}
-                    onClick={() => openProject(item.id)}
-                  >
-                    <span className="project-dot" />
-                    <span>{item.title}</span>
-                    <small>{fmt(item.duration)}</small>
-                  </button>
-                ))}
-              </div>
-            </details>
-          )}
-          {!project ? (
-            <div className="empty-source">
-              <SourceImport
-                url={url}
-                onUrl={setUrl}
-                onFile={importFile}
-                onYoutube={importYoutube}
-                busy={isBusy || importSubmitting}
-                uploading={importSubmitting}
-              />
-              <button
-                className="demo-button"
-                onClick={loadDemo}
-                disabled={isBusy || importSubmitting}
-              >
-                <Sparkles size={15} /> Try the 12-second tracking demo{" "}
-                <ArrowRight size={14} />
-              </button>
-            </div>
-          ) : (
-            <>
-              <div className="source-card">
-                <div
-                  className="source-thumb"
-                  style={
-                    project.thumbnail_url
-                      ? { backgroundImage: `url(${project.thumbnail_url})` }
-                      : undefined
-                  }
-                >
-                  <Film size={22} />
-                  <span>{fmt(project.duration)}</span>
-                </div>
-                <div className="source-meta">
-                  <strong>{project.title}</strong>
-                  <span>
-                    {project.width} × {project.height} · {project.fps} fps
-                  </span>
-                  <span className="source-ok">
-                    <Check size={13} /> Source ready
-                  </span>
-                </div>
-              </div>
-              <button
-                className="outline-button full"
-                onClick={() => {
-                  setError("");
-                  setNewProjectOpen(true);
-                }}
-              >
-                <Plus size={15} /> Import another video
-              </button>
-              <AnalysisControls
-                options={{
-                  mode: analysisMode,
-                  targetDuration,
-                  tolerance: analysisTolerance,
-                  strictMax: analysisStrictMax,
-                  maxClips: analysisMaxClips,
-                  topic: analysisTopic,
-                  useTranscript: analysisUseTranscript,
-                  provider: analysisProvider,
-                }}
-                groqAvailable={
-                  !!health.configuration?.highlights?.groq_available
-                }
-                onOpenSettings={() => setSettingsOpen(true)}
-                onModeChange={setAnalysisMode}
-                onDurationChange={setTargetDuration}
-                onToleranceChange={setAnalysisTolerance}
-                onStrictMaxChange={setAnalysisStrictMax}
-                onMaxClipsChange={setAnalysisMaxClips}
-                onTopicChange={setAnalysisTopic}
-                onTranscriptChange={setAnalysisUseTranscript}
-                onProviderChange={setAnalysisProvider}
-                onAnalyze={analyze}
-                busy={isBusy}
-              />
-              <section className="settings-section">
-                <div className="section-title">Framing</div>
-                <div className="select-row">
-                  <button
-                    disabled={!selected}
-                    className={selected?.framing === "follow" ? "selected" : ""}
-                    onClick={() =>
-                      selected && patchClip(selected.id, { framing: "follow" })
-                    }
-                  >
-                    <Focus size={15} />
-                    <span>Follow subject</span>
-                  </button>
-                  <button
-                    disabled={!selected}
-                    className={selected?.framing === "manual" ? "selected" : ""}
-                    onClick={() =>
-                      selected && patchClip(selected.id, { framing: "manual" })
-                    }
-                  >
-                    <AlignCenter size={15} />
-                    <span>Manual focus</span>
-                  </button>
-                  <button
-                    disabled={!selected}
-                    className={selected?.framing === "fit" ? "selected" : ""}
-                    onClick={() =>
-                      selected && patchClip(selected.id, { framing: "fit" })
-                    }
-                  >
-                    <Maximize2 size={15} />
-                    <span>Fit frame</span>
-                  </button>
-                </div>
-                {selected?.framing === "manual" && (
-                  <label className="range-control">
-                    <span>
-                      Focus{" "}
-                      <b>{Math.round((selected.focus_x || 0.5) * 100)}%</b>
-                    </span>
-                    <input
-                      type="range"
-                      min="0"
-                      max="1"
-                      step=".01"
-                      value={selected.focus_x}
-                      onChange={(e) =>
-                        patchClip(selected.id, {
-                          focus_x: Number(e.target.value),
-                        })
-                      }
-                    />
-                  </label>
-                )}
-                {selected?.framing === "follow" && (
-                  <label className="select-setting">
-                    <span>Subject position</span>
-                    <select
-                      aria-label="Subject position"
-                      value={selected.subject || "auto"}
-                      onChange={(e) =>
-                        patchClip(selected.id, {
-                          subject: e.target.value as Clip["subject"],
-                        })
-                      }
-                    >
-                      <option value="auto">Auto detect</option>
-                      <option value="left">Prefer left</option>
-                      <option value="right">Prefer right</option>
-                    </select>
-                  </label>
-                )}
-              </section>
-              <section className="settings-section">
-                <div className="section-title">Enhance</div>
-                <TranscriptionControls
-                  projectId={project.id}
-                  clipId={selected?.id}
-                  clipDuration={selected ? selected.end - selected.start : 0}
-                  sourceDuration={duration}
-                  busy={isBusy}
-                  available={health.transcription !== false}
-                  settingsOpen={settingsOpen}
-                  hasTranscript={Boolean(
-                    selected?.transcript?.length || project.transcript?.length,
-                  )}
-                  onTranscribe={async (options) => transcribe(options)}
-                  onOpenSettings={() => setSettingsOpen(true)}
-                />
-                <div className="setting-line smoothing-row">
-                  <span>
-                    <Activity size={15} /> Smart smoothing
-                  </span>
-                  <button
-                    disabled={!selected}
-                    aria-label={
-                      smoothingEnabled
-                        ? "Disable smart smoothing"
-                        : "Enable smart smoothing"
-                    }
-                    className={`toggle ${smoothingEnabled ? "on" : ""}`}
-                    onClick={() =>
-                      selected &&
-                      patchClip(selected.id, {
-                        smoothing: smoothingEnabled ? 0 : 0.15,
-                      })
-                    }
-                  >
-                    <i />
-                  </button>
-                </div>
-                {smoothingEnabled && selected && (
-                  <label className="range-control smoothing-control">
-                    <span>
-                      Strength{" "}
-                      <b>{Math.round((selected.smoothing ?? 0.15) * 100)}%</b>
-                    </span>
-                    <input
-                      aria-label="Smoothing strength"
-                      type="range"
-                      min="0"
-                      max="1"
-                      step=".01"
-                      value={selected.smoothing ?? 0.15}
-                      onChange={(e) =>
-                        patchClip(selected.id, {
-                          smoothing: Number(e.target.value),
-                        })
-                      }
-                    />
-                  </label>
-                )}
-              </section>
-              {selected && (
-                <ClipEnhancements
-                  start={selected.start}
-                  end={selected.end}
-                  playback_speed={selected.playback_speed ?? 1}
-                  audio_volume={selected.audio_volume ?? 1}
-                  audio_denoise={selected.audio_denoise ?? false}
-                  audio_fade={selected.audio_fade ?? 0}
-                  disabled={isBusy}
-                  onChange={(patch: ClipEnhancementsValue) =>
-                    patchClip(selected.id, patch)
-                  }
-                />
-              )}
-              <section className="settings-section caption-settings">
-                <div className="section-title">
-                  <span>Captions</span>
-                  <button
-                    className="text-button"
-                    onClick={() => selected && downloadSrt(selected.id)}
-                  >
-                    <Download size={12} /> SRT
-                  </button>
-                </div>
-                <textarea
-                  disabled={!selected}
-                  value={selected?.caption_text || ""}
-                  onChange={(e) =>
-                    selected &&
-                    patchClip(selected.id, { caption_text: e.target.value })
-                  }
-                  placeholder="Add a caption overlay or transcribe first…"
-                />
-                <label className="caption-toggle">
-                  <input
-                    type="checkbox"
-                    disabled={!selected}
-                    checked={selected?.caption_enabled !== false}
-                    onChange={(e) =>
-                      selected &&
-                      patchClip(selected.id, {
-                        caption_enabled: e.target.checked,
-                      })
-                    }
-                  />{" "}
-                  Burn captions into export
-                </label>
-                <div className="caption-controls">
-                  <select
-                    disabled={!selected}
-                    value={selected?.caption_style || "clean"}
-                    onChange={(e) =>
-                      selected &&
-                      patchClip(selected.id, {
-                        caption_style: e.target.value as Clip["caption_style"],
-                      })
-                    }
-                  >
-                    <option value="clean">Clean</option>
-                    <option value="bold">Bold</option>
-                    <option value="minimal">Minimal</option>
-                  </select>
-                  <input
-                    aria-label="Caption color"
-                    disabled={!selected}
-                    type="color"
-                    value={selected?.caption_color || brandColor}
-                    onChange={(e) =>
-                      selected &&
-                      patchClip(selected.id, { caption_color: e.target.value })
-                    }
-                  />
-                  <div className="position-toggle">
-                    <button
-                      aria-label="Place captions at bottom"
-                      className={
-                        selected?.caption_position === "bottom"
-                          ? "selected"
-                          : ""
-                      }
-                      onClick={() =>
-                        selected &&
-                        patchClip(selected.id, {
-                          caption_position: "bottom",
-                          caption_x: 0.5,
-                          caption_y: 0.86,
-                        })
-                      }
-                    >
-                      <AlignEndHorizontal size={13} />
-                    </button>
-                    <button
-                      aria-label="Place captions at center"
-                      className={
-                        selected?.caption_position === "center"
-                          ? "selected"
-                          : ""
-                      }
-                      onClick={() =>
-                        selected &&
-                        patchClip(selected.id, {
-                          caption_position: "center",
-                          caption_x: 0.5,
-                          caption_y: 0.5,
-                        })
-                      }
-                    >
-                      <AlignCenter size={13} />
-                    </button>
-                  </div>
-                </div>
-                {selected && (
-                  <CaptionPlacement
-                    x={selected.caption_x ?? 0.5}
-                    y={selected.caption_y ?? (selected.caption_position === "center" ? 0.5 : 0.86)}
-                    disabled={isBusy}
-                    onChange={(patch) => patchClip(selected.id, patch)}
-                  />
-                )}
-                <div className="brand-actions">
-                  <button
-                    className="brand-save"
-                    onClick={() => {
-                      const color = selected?.caption_color || brandColor;
-                      localStorage.setItem("clipflow-brand-color", color);
-                      setBrandColor(color);
-                      setNotice("Brand color saved");
-                    }}
-                  >
-                    <Palette size={13} /> Save brand color
-                  </button>
-                  <button
-                    className="brand-save"
-                    onClick={() => {
-                      const color = brandColor;
-                      selected &&
-                        patchClip(selected.id, { caption_color: color });
-                      setNotice("Brand color applied");
-                    }}
-                  >
-                    Apply preset
-                  </button>
-                  <button
-                    className="brand-save"
-                    onClick={() => {
-                      setBrandColor("#b8a7ff");
-                      selected &&
-                        patchClip(selected.id, { caption_color: "#b8a7ff" });
-                      localStorage.removeItem("clipflow-brand-color");
-                      setNotice("Brand color reset");
-                    }}
-                  >
-                    Reset
-                  </button>
-                </div>
-              </section>
-              <section className="settings-section shortcuts">
-                <div className="section-title">Shortcuts</div>
-                <div>
-                  <kbd>Space</kbd>
-                  <span>Play / pause</span>
-                </div>
-                <div>
-                  <kbd>I</kbd>
-                  <span>Set in point</span>
-                  <kbd>O</kbd>
-                  <span>Set out point</span>
-                </div>
-                <div>
-                  <kbd>Ctrl Z</kbd>
-                  <span>Undo edit</span>
-                </div>
-              </section>
-            </>
-          )}
-          <div className="left-footer">
-            <button
-              className="icon-button"
-              title="Settings"
-              aria-label="Open provider settings"
-              onClick={() => setSettingsOpen(true)}
-            >
-              <Settings2 size={16} />
-            </button>
-          </div>
-        </aside>
-        <main className="canvas-area">
-          <div className="canvas-toolbar">
-            <div className="crumb">
-              <Clapperboard size={16} />
-              <span>{project ? "Edit" : "New project"}</span>
-            </div>
-            <div className="canvas-tools">
-              <span className="tool-button">9:16</span>
-              <select
-                className="tool-button"
-                aria-label="Export resolution"
-                value={selected?.resolution || 720}
-                disabled={!selected}
-                onChange={(e) =>
-                  selected &&
-                  patchClip(selected.id, { resolution: Number(e.target.value) })
-                }
-              >
-                <option value="360">360 × 640</option>
-                <option value="720">720 × 1280</option>
-                <option value="1080">1080 × 1920</option>
-              </select>
-              <button
-                className="tool-button"
-                disabled={!selected || isBusy}
-                onClick={renderProof}
-              >
-                Render proof
-              </button>
-              {proofUrl && (
-                <a
-                  className="tool-button"
-                  href={proofUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                >
-                  Open rendered proof
-                </a>
-              )}
-            </div>
-          </div>
-          <div className="preview-stage">
-            <div className="current-clip-strip">
-              <div>
-                <span className="current-clip-kicker">Editing</span>
-                <strong>{selected?.title || "No clip selected"}</strong>
-                {selected && (
-                  <small>
-                    {fmt(selected.start)}–{fmt(selected.end)} ·{" "}
-                    {fmt(selected.end - selected.start)} source
-                  </small>
-                )}
-              </div>
-              <button
-                className="tool-button current-export"
-                disabled={!selected || isBusy}
-                onClick={() => selected && exportClips([selected.id])}
-              >
-                <Download size={14} /> Export current
-              </button>
-            </div>
-            <PreviewPlayer
-              project={project}
-              clip={selected}
-              proofUrl={proofUrl}
-              duration={duration}
-              activeTime={activeTime}
-              videoRef={videoRef}
-              pendingSourceSeek={pendingSourceSeek}
-              playing={playing}
-              expanded={expandedPreview}
-              onPlayState={setPlaying}
-              onTimeChange={setActiveTime}
-              onPatch={patchClip}
-              onRenderProof={renderProof}
-              onUseSource={() => {
-                proofJobId.current = "";
-                pendingSourceSeek.current = clamp(activeTime, 0, duration);
-                setProofUrl("");
-              }}
-              onExpand={() => setExpandedPreview((value) => !value)}
-            />
-          </div>
-          <EditorTimeline
-            duration={duration}
-            clips={clips}
-            selectedId={selectedId}
-            activeTime={activeTime}
-            playing={playing}
-            zoom={timelineZoom}
-            onZoomChange={setTimelineZoom}
-            onSeek={(time) => seek(time, true)}
-            onSelect={(clip) => {
-              if (clip.id !== selectedId) {
-                proofJobId.current = "";
-                setProofUrl("");
-              }
-              setSelectedId(clip.id);
-              seek(clip.start, true);
-            }}
-            onPlayToggle={togglePlay}
-            onStep={(amount) => seek(activeTime + amount, true)}
-            onTrim={(id, start, end) => patchClip(id, { start, end })}
-            onFitSource={() => setTimelineZoom(1)}
-            onFocusClip={() =>
-              selected &&
-              setTimelineZoom(
-                clamp(
-                  (duration / Math.max(selected.end - selected.start, 1)) * 0.8,
-                  1,
-                  256,
-                ),
-              )
-            }
+            onDemo={loadDemo}
+            onUpdate={updateProject}
+            busy={isBusy || importSubmitting}
           />
-          {selected && (
-            <div className="trim-sliders">
-              <label>
-                Start{" "}
-                <input
-                  aria-label="Trim start"
-                  type="range"
-                  min="0"
-                  max={duration}
-                  step="0.1"
-                  value={selected.start}
-                  onChange={(e) =>
-                    setSelectedRange("start", Number(e.target.value))
-                  }
-                />
-              </label>
-              <label>
-                End{" "}
-                <input
-                  aria-label="Trim end"
-                  type="range"
-                  min="0"
-                  max={duration}
-                  step="0.1"
-                  value={selected.end}
-                  onChange={(e) =>
-                    setSelectedRange("end", Number(e.target.value))
-                  }
-                />
-              </label>
+        )}
+        {page === "exports" && (
+          <ExportsPage
+            projects={projects}
+            jobs={jobs}
+            onOpen={openProject}
+            onCancel={cancelJob}
+            onRetry={retryJob}
+            onRefresh={refreshJobs}
+          />
+        )}
+        {page === "publish" && (
+          <PublishPage
+            api={api}
+            projects={projects}
+            currentId={project?.id}
+            onOpen={openProject}
+            onSettings={() => {
+              setSettingsSection("publishing");
+              navigatePage("settings");
+            }}
+            onNotice={setNotice}
+          />
+        )}
+        {page === "settings" && (
+          <SettingsPage
+            initialTab={settingsSection}
+            api={api}
+            health={health}
+            projects={projects}
+            onTour={() => setTourReplay((n) => n + 1)}
+            onNotice={setNotice}
+            publishing={<PublishingSettings api={api} onNotice={setNotice} />}
+            onPreviewsCleared={(id) => {
+              if (id === project?.id) setProofUrl("");
+            }}
+          >
+            <ProviderSettings
+              api={api}
+              open
+              embedded
+              onClose={() => undefined}
+              onHealth={setHealth}
+              onNotice={setNotice}
+            />
+          </SettingsPage>
+        )}
+        {page === "editor" && !project && (
+          <main className="workspace-page">
+            <header className="page-heading">
+              <div>
+                <h1>Open a project to edit</h1>
+                <p>
+                  Choose a source from your library or start with a new video.
+                </p>
+              </div>
+            </header>
+            <div className="workspace-empty">
+              <Film size={42} />
+              <h2>Your editing workspace</h2>
+              <p>
+                Clipping, captions, framing, and sound in one focused workspace.
+              </p>
+              <button
+                className="primary-action"
+                onClick={() => navigatePage("projects")}
+              >
+                <FolderOpen size={18} />
+                Browse projects
+              </button>
+              <button
+                className="text-action"
+                onClick={() => setNewProjectOpen(true)}
+              >
+                Import a new video
+              </button>
             </div>
-          )}
-        </main>
-        <aside className="right-panel">
-          <div className="right-tabs">
-            {(["clips", "exports", "transcript", "connections"] as const).map(
-              (tab) => (
+          </main>
+        )}
+        <div
+          className={`editor-route workspace-${workspaceMode}`}
+          hidden={page !== "editor" || !project}
+        >
+          <header className="studio-header">
+            <button
+              className="icon-button back-projects"
+              aria-label="Back to projects"
+              onClick={() => navigatePage("projects")}
+            >
+              <ArrowLeft size={19} />
+            </button>
+            <div className="header-project">
+              <span>Project</span>
+              <strong title={project?.title}>{project?.title}</strong>
+            </div>
+            <div className="header-context">
+              {" "}
+              <span className={`save-status ${saveState}`} role="status">
+                <span className="save-status-dot" />
+                {saveState === "saving"
+                  ? saveError
+                    ? "Saving… · previous error"
+                    : "Saving…"
+                  : saveState === "error"
+                    ? "Save failed"
+                    : saveState === "dirty" ? "Unsaved changes" : "Saved"}
+              </span>
+              {saveError && (
                 <button
-                  key={tab}
-                  className={sidebar === tab ? "active" : ""}
-                  onClick={() => setSidebar(tab)}
+                  className="save-status-detail"
+                  title={saveError}
+                  onClick={retryFailedSaves}
                 >
-                  {tab === "clips" ? (
-                    <Layers3 size={15} />
-                  ) : tab === "exports" ? (
-                    <ArrowDownToLine size={15} />
-                  ) : tab === "transcript" ? (
-                    <MessageSquareText size={15} />
-                  ) : (
-                    <Link2 size={15} />
-                  )}
-                  <span>{tab}</span>
-                  {tab === "clips" && clips.length > 0 && <b>{clips.length}</b>}
+                  Retry save
                 </button>
-              ),
-            )}
-          </div>
-          {sidebar === "clips" && (
-            <div className="clips-pane">
-              <div className="clips-toolbar">
-                <div className="pane-title">
-                  Clip library <span>{clips.length}</span>
-                </div>
+              )}
+            </div>
+            <div className="header-actions">
+              <div className="workspace-toggle" hidden={showSetup}>
                 <button
-                  className="icon-button"
-                  aria-label="Add clip"
-                  onClick={addClip}
+                  className={workspaceMode === "edit" ? "active" : ""}
+                  onClick={() => setWorkspaceMode("edit")}
                 >
-                  <Plus size={17} />
+                  Edit
+                </button>
+                <button
+                  className={workspaceMode === "review" ? "active" : ""}
+                  onClick={() => setWorkspaceMode("review")}
+                >
+                  Review
                 </button>
               </div>
-              {clips.length > 0 && (
-                <>
-                  <div className="clip-search">
-                    <Search size={14} />
-                    <input
-                      placeholder="Search clips"
-                      value={search}
-                      onChange={(e) => setSearch(e.target.value)}
-                    />
-                    {search && (
-                      <button
-                        aria-label="Clear clip search"
-                        onClick={() => setSearch("")}
-                      >
-                        ×
-                      </button>
-                    )}
-                  </div>
-                  <div
-                    className="clip-filters"
-                    role="tablist"
-                    aria-label="Clip filters"
-                  >
-                    {(["all", "drafts", "reviewed", "exported"] as const).map((filter) => (
-                      <button
-                        key={filter}
-                        className={clipFilter === filter ? "active" : ""}
-                        onClick={() => setClipFilter(filter)}
-                      >
-                        {filter === "all"
-                          ? "All"
-                          : filter === "drafts"
-                            ? "Drafts"
-                            : filter === "reviewed"
-                              ? "Reviewed"
-                            : "Exported"}
-                      </button>
-                    ))}
-                  </div>
-                  {clips.some((clip) => clip.reason || clip.score !== undefined) && (
-                    <div className="suggestion-toolbar">
-                      <span>Suggestions</span>
-                      <button
-                        className="text-button"
-                        disabled={isBusy}
-                        onClick={() => void analyze("smart")}
-                      >
-                        <WandSparkles size={12} /> Regenerate
-                      </button>
-                    </div>
-                  )}
-                </>
-              )}
-              <div className="clip-list">
-                {filteredClips.length === 0 ? (
-                  <div className="no-clips">
-                    <div className="empty-list-icon">
-                      <Scissors size={17} />
-                    </div>
-                    <strong>
-                      {clips.length
-                        ? "No clips match this view"
-                        : "No clips yet"}
-                    </strong>
-                    <span>
-                      {clips.length
-                        ? "Clear the search or switch between All, Drafts, Reviewed, and Exported."
-                        : "Import and split a video, or add a clip manually."}
-                    </span>
-                    {!clips.length && (
-                      <button className="outline-button" onClick={addClip}>
-                        <Plus size={14} /> Add first clip
-                      </button>
-                    )}
-                  </div>
-                ) : (
-                  filteredClips.map((c) => (
-                    <ClipRow
-                      key={c.id}
-                      clip={c}
-                      duration={duration}
-                      active={c.id === selectedId}
-                      onSelect={() => {
-                        if (c.id !== selectedId) {
-                          proofJobId.current = "";
-                          setProofUrl("");
-                        }
-                        setSelectedId(c.id);
-                        seek(c.start, true);
-                      }}
-                      onPatch={(p) => patchClip(c.id, p)}
-                      onReview={() => patchClip(c.id, { reviewed: !c.reviewed })}
-                      onSuggestionStatus={(suggestion_status) =>
-                        patchClip(c.id, { suggestion_status })
+              <button
+                className="icon-button"
+                aria-label="Undo"
+                title="Undo"
+                onClick={undo}
+                disabled={!history.length}
+              >
+                <Undo2 size={17} />
+              </button>
+              <button
+                className="icon-button"
+                aria-label="Redo"
+                title="Redo"
+                onClick={redo}
+                disabled={!future.length}
+              >
+                <Redo2 size={17} />
+              </button>
+              <button
+                className="secondary-action"
+                onClick={() => navigatePage("exports")}
+              >
+                <Download size={16} />
+                Exports
+              </button>
+            </div>
+          </header>
+          <nav className="editor-journey" aria-label="Project workflow">
+            <button aria-current={showSetup ? "step" : undefined} onClick={() => setShowSetup(true)}>Clip setup</button>
+            <button disabled={!clips.length} aria-current={!showSetup ? "step" : undefined} onClick={() => setShowSetup(false)}>Edit clips ({clips.length})</button>
+            <button onClick={() => navigatePage("exports")}>Exports</button>
+            <button onClick={() => navigatePage("publish")}>Publish</button>
+          </nav>
+          {showSetup && project ? <ClipSetup key={project.id} project={project}
+            busy={isBusy || analysisSubmitting}
+            initialSettings={project.generation_settings}
+            availableProviders={health.configuration?.highlights?.available_providers as ClipSetupSettings["provider"][] | undefined}
+            onGenerate={generateConfiguredClips}
+            onReplaceSource={() => setNewProjectOpen(true)}
+            onCancel={clips.length ? () => setShowSetup(false) : undefined} /> : <>
+          <div className="workspace">
+            <aside className="left-panel" aria-label="Editing tools">
+              <div className="inspector-tabs">
+                {(["clipping", "layout", "captions", "audio"] as const).map(
+                  (tab) => (
+                    <button
+                      key={tab}
+                      aria-pressed={inspector === tab}
+                      className={inspector === tab ? "active" : ""}
+                      data-tour={
+                        tab === "captions" ? "editor-captions" : undefined
                       }
-                      onDelete={() => deleteClip(c.id)}
-                      onDuplicate={() => duplicateClip(c)}
-                      onWork={() => workOnClip(c)}
-                    />
-                  ))
+                      onClick={() => setInspector(tab)}
+                    >
+                      {tab === "clipping" ? (
+                        <Scissors size={18} />
+                      ) : tab === "layout" ? (
+                        <Focus size={18} />
+                      ) : tab === "captions" ? (
+                        <MessageSquareText size={18} />
+                      ) : (
+                        <Activity size={18} />
+                      )}
+                      <span>
+                        {tab === "clipping"
+                          ? "Trim"
+                          : tab === "layout"
+                            ? "Layout"
+                            : tab === "captions"
+                              ? "Captions"
+                              : "Audio"}
+                      </span>
+                    </button>
+                  ),
                 )}
               </div>
-              {clips.length > 0 && (
-                <div className="clips-footer">
-                  <label className="check-row">
-                    <input
-                      type="checkbox"
-                      checked={selectedCount === clips.length}
-                      onChange={(e) => {
-                        const checked = e.target.checked;
-                        clips.forEach((c) => {
-                          void patchClip(c.id, { selected: checked });
-                        });
-                      }}
-                    />
-                    <span>Select all clips</span>
-                  </label>
-                  <button
-                    className="export-button"
-                    disabled={!selectedCount || isBusy}
-                    onClick={() =>
-                      exportClips(
-                        clips.filter((c) => c.selected).map((c) => c.id),
-                      )
+              <div className="inspector-content" ref={inspectorContent}>
+                {project && (
+                  <>
+                    <div
+                      hidden={inspector !== "clipping"}
+                      data-tour="editor-generation"
+                    >
+                      <div className="inspector-source">
+                        <Film size={17} />
+                        <span>{fmt(project.duration)} source</span>
+                        <span>
+                          {project.width} × {project.height}
+                        </span>
+                      </div>{" "}
+                      <section className="settings-section clip-edit-controls">
+                        <h3>{selected ? `Clip ${clips.findIndex((c) => c.id === selected.id) + 1}` : "Choose a clip"}</h3>
+                        {selected && <>
+                          <label>Clip name<input aria-label="Clip name" maxLength={150} value={selected.title} onChange={(event) => patchClip(selected.id, { title: event.target.value })} /></label>
+                          <label>Start in seconds<NumberSetting value={selected.start} min={0} max={selected.end - .1} step={.1} onChange={(value) => setSelectedRange("start", value)} /></label>
+                          <label>End in seconds<NumberSetting value={selected.end} min={selected.start + .1} max={duration} step={.1} onChange={(value) => setSelectedRange("end", value)} /></label>
+                          <p>Changes apply to this clip only.</p>
+                          <button className="secondary-action" onClick={() => selected && workOnClip(selected)}>Fit this clip in the timeline</button>
+                        </>}
+                      </section>
+                      <section className="settings-section">
+                        <button className="primary-action" disabled={isBusy} onClick={() => setShowSetup(true)}><Plus size={16} /> Generate more clips</button>
+                      </section>
+                    </div>
+                    <div hidden={inspector !== "layout"}>
+                      {" "}
+                      <section className="settings-section">
+                        <div className="section-title">Framing</div>
+                        <div className="select-row">
+                          <button
+                            disabled={!selected}
+                            className={
+                              selected?.framing === "follow" ? "selected" : ""
+                            }
+                            onClick={() =>
+                              selected &&
+                              patchClip(selected.id, { framing: "follow" })
+                            }
+                          >
+                            <Focus size={15} />
+                            <span>Automatic tracking</span>
+                          </button>
+                          <button
+                            disabled={!selected}
+                            className={
+                              selected?.framing === "manual" ? "selected" : ""
+                            }
+                            onClick={() =>
+                              selected &&
+                              patchClip(selected.id, { framing: "manual" })
+                            }
+                          >
+                            <AlignCenter size={15} />
+                            <span>Manual camera</span>
+                          </button>
+                          <button
+                            disabled={!selected}
+                            className={
+                              selected?.framing === "fit" ? "selected" : ""
+                            }
+                            onClick={() =>
+                              selected &&
+                              patchClip(selected.id, { framing: "fit" })
+                            }
+                          >
+                            <Maximize2 size={15} />
+                            <span>Fit frame</span>
+                          </button>
+                          <button
+                            disabled={!selected}
+                            className={
+                              selected?.framing === "blur" ? "selected" : ""
+                            }
+                            onClick={() =>
+                              selected &&
+                              patchClip(selected.id, { framing: "blur" })
+                            }
+                          >
+                            <Layers3 size={15} />
+                            <span>Blur background</span>
+                          </button>
+                        </div>
+                        <p className="framing-help">
+                          {selected?.framing === "follow"
+                            ? "Automatically follows faces or movement. Choose a movement preset below, then render a proof to review it."
+                            : selected?.framing === "manual"
+                              ? "You place the camera. Set a fixed position, or add keyframes below to pan and zoom."
+                              : "Keeps the whole source visible. Automatic tracking and camera keyframes are not applied."}
+                        </p>
+                        {selected?.framing === "manual" &&
+                          !selected.camera_keyframes?.length && (
+                            <label className="range-control">
+                              <span>
+                                Focus{" "}
+                                <b>
+                                  {Math.round((selected.focus_x || 0.5) * 100)}%
+                                </b>
+                              </span>
+                              <input
+                                type="range"
+                                min="0"
+                                max="1"
+                                step=".01"
+                                value={selected.focus_x}
+                                onChange={(e) =>
+                                  patchClip(selected.id, {
+                                    focus_x: Number(e.target.value),
+                                  })
+                                }
+                              />
+                            </label>
+                          )}
+                        {selected?.framing === "follow" && (
+                          <label className="select-setting">
+                            <span>Subject position</span>
+                            <select
+                              aria-label="Subject position"
+                              value={selected.subject || "auto"}
+                              onChange={(e) =>
+                                patchClip(selected.id, {
+                                  subject: e.target.value as Clip["subject"],
+                                })
+                              }
+                            >
+                              <option value="auto">Auto detect</option>
+                              <option value="left">Prefer left</option>
+                              <option value="right">Prefer right</option>
+                            </select>
+                          </label>
+                        )}
+                      </section>
+                      {selected &&
+                        (selected.framing === "follow" ||
+                          selected.framing === "manual") && (
+                          <CameraControls
+                            clip={selected}
+                            activeTime={activeTime}
+                            onPatch={(patch) => patchClip(selected.id, patch)}
+                            onSeek={(time) => seek(time, true)}
+                          />
+                        )}
+                    </div>
+                    <div hidden={inspector !== "captions"}>
+                      <section className="settings-section">
+                        <div className="section-title">Transcription</div>{" "}
+                        <TranscriptionControls
+                          projectId={project.id}
+                          clipId={selected?.id}
+                          clipDuration={
+                            selected ? selected.end - selected.start : 0
+                          }
+                          sourceDuration={duration}
+                          busy={isBusy}
+                          available={health.transcription !== false}
+                          settingsOpen={settingsOpen}
+                          hasTranscript={Boolean(
+                            selected?.transcript?.length ||
+                              project.transcript?.length,
+                          )}
+                          onTranscribe={async (options) => transcribe(options)}
+                          onOpenSettings={() => setSettingsOpen(true)}
+                        />
+                      </section>{" "}
+                      <section className="settings-section caption-settings">
+                        <div className="section-title">
+                          <span>Captions</span>
+                          <button
+                            className="text-button"
+                            onClick={() => selected && downloadSrt(selected.id)}
+                          >
+                            <Download size={12} /> SRT
+                          </button>
+                        </div>
+                        <textarea
+                          disabled={!selected}
+                          value={selected?.caption_text || ""}
+                          onChange={(e) =>
+                            selected &&
+                            patchClip(selected.id, {
+                              caption_text: e.target.value,
+                            })
+                          }
+                          placeholder="Add a caption overlay or transcribe first…"
+                        />
+                        <label className="caption-toggle">
+                          <input
+                            type="checkbox"
+                            disabled={!selected}
+                            checked={selected?.caption_enabled !== false}
+                            onChange={(e) =>
+                              selected &&
+                              patchClip(selected.id, {
+                                caption_enabled: e.target.checked,
+                              })
+                            }
+                          />{" "}
+                          Burn captions into export
+                        </label>
+                        <div className="caption-controls">
+                          <select
+                            disabled={!selected}
+                            value={selected?.caption_style || "clean"}
+                            onChange={(e) =>
+                              selected &&
+                              patchClip(selected.id, {
+                                caption_style: e.target
+                                  .value as Clip["caption_style"],
+                              })
+                            }
+                          >
+                            <option value="clean">Clean</option>
+                            <option value="bold">Bold</option>
+                            <option value="minimal">Minimal</option>
+                          </select>
+                          <input
+                            aria-label="Caption color"
+                            disabled={!selected}
+                            type="color"
+                            value={selected?.caption_color || brandColor}
+                            onChange={(e) =>
+                              selected &&
+                              patchClip(selected.id, {
+                                caption_color: e.target.value,
+                              })
+                            }
+                          />
+                          <div className="position-toggle">
+                            <button
+                              aria-label="Place captions at bottom"
+                              className={
+                                selected?.caption_position === "bottom"
+                                  ? "selected"
+                                  : ""
+                              }
+                              onClick={() =>
+                                selected &&
+                                patchClip(selected.id, {
+                                  caption_position: "bottom",
+                                  caption_x: 0.5,
+                                  caption_y: 0.86,
+                                })
+                              }
+                            >
+                              <AlignEndHorizontal size={13} />
+                            </button>
+                            <button
+                              aria-label="Place captions at center"
+                              className={
+                                selected?.caption_position === "center"
+                                  ? "selected"
+                                  : ""
+                              }
+                              onClick={() =>
+                                selected &&
+                                patchClip(selected.id, {
+                                  caption_position: "center",
+                                  caption_x: 0.5,
+                                  caption_y: 0.5,
+                                })
+                              }
+                            >
+                              <AlignCenter size={13} />
+                            </button>
+                          </div>
+                        </div>
+                        {selected && (
+                          <CaptionPlacement
+                            x={selected.caption_x ?? 0.5}
+                            y={
+                              selected.caption_y ??
+                              (selected.caption_position === "center"
+                                ? 0.5
+                                : 0.86)
+                            }
+                            disabled={isBusy}
+                            onChange={(patch) => patchClip(selected.id, patch)}
+                          />
+                        )}
+                        {selected && (
+                          <CaptionPresets
+                            clip={selected}
+                            disabled={isBusy}
+                            onApply={(values) => patchClip(selected.id, values)}
+                            onApplyAll={(values) =>
+                              clips.forEach((c) => patchClip(c.id, values))
+                            }
+                          />
+                        )}
+                        <div className="subtitle-import-row">
+                          <label className="secondary-action">
+                            Import SRT / VTT
+                            <input
+                              type="file"
+                              hidden
+                              accept=".srt,.vtt,text/plain,text/vtt"
+                              disabled={isBusy}
+                              onChange={(event) => {
+                                const file = event.target.files?.[0];
+                                event.target.value = "";
+                                void importSubtitles(file);
+                              }}
+                            />
+                          </label>
+                          <small>
+                            Uses source-video timestamps. Replaces the source
+                            transcript after confirmation.
+                          </small>
+                        </div>
+                        <div className="brand-actions">
+                          <button
+                            className="brand-save"
+                            onClick={() => {
+                              const color =
+                                selected?.caption_color || brandColor;
+                              localStorage.setItem(
+                                "clipflow-brand-color",
+                                color,
+                              );
+                              setBrandColor(color);
+                              setNotice("Brand color saved");
+                            }}
+                          >
+                            <Palette size={13} /> Save brand color
+                          </button>
+                          <button
+                            className="brand-save"
+                            onClick={() => {
+                              const color = brandColor;
+                              selected &&
+                                patchClip(selected.id, {
+                                  caption_color: color,
+                                });
+                              setNotice("Brand color applied");
+                            }}
+                          >
+                            Apply preset
+                          </button>
+                          <button
+                            className="brand-save"
+                            onClick={() => {
+                              setBrandColor("#b8a7ff");
+                              selected &&
+                                patchClip(selected.id, {
+                                  caption_color: "#b8a7ff",
+                                });
+                              localStorage.removeItem("clipflow-brand-color");
+                              setNotice("Brand color reset");
+                            }}
+                          >
+                            Reset
+                          </button>
+                        </div>
+                      </section>
+                    </div>
+                    <div hidden={inspector !== "audio"}>
+                      {" "}
+                      {selected && (
+                        <ClipEnhancements
+                          start={selected.start}
+                          end={selected.end}
+                          playback_speed={selected.playback_speed ?? 1}
+                          audio_volume={selected.audio_volume ?? 1}
+                          audio_denoise={selected.audio_denoise ?? false}
+                          audio_fade={selected.audio_fade ?? 0}
+                          disabled={isBusy}
+                          onChange={(patch: ClipEnhancementsValue) =>
+                            patchClip(selected.id, patch)
+                          }
+                        />
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
+            </aside>
+            <main className="canvas-area">
+              <div className="canvas-toolbar">
+                <div className="crumb">
+                  <Clapperboard size={16} />
+                  <span>{project ? "Edit" : "New project"}</span>
+                </div>
+                {!selected && (
+                  <span className="source-dimensions">
+                    {project?.width} × {project?.height} source
+                  </span>
+                )}
+                <div className="canvas-tools" hidden={!selected}>
+                  <select
+                    className="tool-button"
+                    aria-label="Output aspect ratio"
+                    value={selected?.aspect_ratio || "9:16"}
+                    disabled={!selected || isBusy}
+                    onChange={(e) =>
+                      selected &&
+                      patchClip(selected.id, {
+                        aspect_ratio: e.target.value as Clip["aspect_ratio"],
+                      })
                     }
                   >
-                    <Download size={15} /> Export{" "}
-                    {selectedCount ? `${selectedCount} selected` : "all"}
+                    <option value="9:16">9:16 Vertical</option>
+                    <option value="1:1">1:1 Square</option>
+                    <option value="4:5">4:5 Portrait</option>
+                    <option value="16:9">16:9 Wide</option>
+                  </select>
+                  <select
+                    className="tool-button"
+                    aria-label="Export resolution"
+                    value={selected?.resolution || 720}
+                    disabled={!selected}
+                    onChange={(e) =>
+                      selected &&
+                      patchClip(selected.id, {
+                        resolution: Number(e.target.value),
+                      })
+                    }
+                  >
+                    {[360, 720, 1080].map((width) => {
+                      const [w, h] = (selected?.aspect_ratio || "9:16")
+                        .split(":")
+                        .map(Number);
+                      return (
+                        <option key={width} value={width}>
+                          {width} × {Math.round((width * h) / w / 2) * 2}
+                        </option>
+                      );
+                    })}
+                  </select>
+                  <button data-tour="editor-save" className="primary-action"
+                    disabled={saveState !== "dirty" && saveState !== "error"}
+                    onClick={() => void flushQueuedSaves(true).then((ok) => ok && setNotice("Settings saved. Render a preview to see the result."))}>
+                    <Save size={15} /> Save settings
                   </button>
-                  <div className="clip-bulk-actions">
-                    <button
-                      className="text-button danger-text"
-                      disabled={!selectedCount || isBusy}
-                      onClick={() =>
-                        bulkDelete(
-                          clips
-                            .filter((clip) => clip.selected)
-                            .map((clip) => clip.id),
-                        )
-                      }
+                  <button data-tour="editor-render" className="tool-button"
+                    disabled={!selected || isBusy || saveState !== "saved" || !!proofUrl}
+                    title={saveState !== "saved" ? "Save settings first" : proofUrl ? "Preview is up to date" : "Render the saved clip"}
+                    onClick={renderProof}>Render preview</button>
+                  {proofUrl && (
+                    <a
+                      className="tool-button"
+                      href={proofUrl}
+                      target="_blank"
+                      rel="noreferrer"
                     >
-                      Remove selected
-                    </button>
-                    <button
-                      className="text-button danger-text"
-                      disabled={!clips.length || isBusy}
-                      onClick={() => bulkDelete(clips.map((clip) => clip.id))}
-                    >
-                      Clear clips
-                    </button>
+                      Open rendered proof
+                    </a>
+                  )}
+                </div>
+              </div>
+              <div className="preview-stage" data-tour="editor-preview">
+                <div className="current-clip-strip">
+                  <div>
+                    <span className="current-clip-kicker">Editing</span>
+                    <strong>
+                      {selected?.title ||
+                        "Source preview · choose a clipping method"}
+                    </strong>
+                    {selected && (
+                      <small>
+                        {fmt(selected.start)}–{fmt(selected.end)} ·{" "}
+                        {fmt(selected.end - selected.start)} source
+                      </small>
+                    )}
                   </div>
+                  <button
+                    className="tool-button current-export"
+                    data-tour="editor-export"
+                    disabled={!selected || isBusy}
+                    onClick={() => selected && exportClips([selected.id])}
+                  >
+                    <Download size={14} /> Export current
+                  </button>
+                </div>
+                <PreviewPlayer
+                  project={project}
+                  clip={selected}
+                  proofUrl={proofUrl}
+                  duration={duration}
+                  activeTime={activeTime}
+                  videoRef={videoRef}
+                  pendingSourceSeek={pendingSourceSeek}
+                  playing={playing}
+                  expanded={expandedPreview}
+                  onPlayState={setPlaying}
+                  onTimeChange={setActiveTime}
+                  onPatch={patchClip}
+                  onRenderProof={renderProof}
+                  renderDisabled={isBusy || saveState !== "saved"}
+                  onUseSource={() => {
+                    proofJobId.current = "";
+                    pendingSourceSeek.current = clamp(activeTime, 0, duration);
+                    setProofUrl("");
+                  }}
+                  onExpand={() => setExpandedPreview((value) => !value)}
+                />
+              </div>
+              <div data-tour="editor-timeline">
+                <EditorTimeline
+                  duration={duration}
+                  clips={clips}
+                  selectedId={selectedId}
+                  activeTime={activeTime}
+                  playing={playing}
+                  zoom={timelineZoom}
+                  onZoomChange={setTimelineZoom}
+                  onSeek={(time) => seek(time, true)}
+                  onSelect={(clip) => {
+                    if (clip.id !== selectedId) {
+                      proofJobId.current = "";
+                      setProofUrl("");
+                    }
+                    setSelectedId(clip.id);
+                    seek(clip.start, true);
+                  }}
+                  onPlayToggle={togglePlay}
+                  onStep={(amount) => seek(activeTime + amount, true)}
+                  onTrim={(id, start, end) => patchClip(id, { start, end })}
+                  onFitSource={() => setTimelineZoom(1)}
+                  onFocusClip={() =>
+                    selected &&
+                    setTimelineZoom(
+                      clamp(
+                        (duration /
+                          Math.max(selected.end - selected.start, 1)) *
+                          0.8,
+                        1,
+                        256,
+                      ),
+                    )
+                  }
+                />
+              </div>
+              {selected && (
+                <div className="trim-sliders">
+                  <label>
+                    Start{" "}
+                    <input
+                      aria-label="Trim start"
+                      type="range"
+                      min="0"
+                      max={duration}
+                      step="0.1"
+                      value={selected.start}
+                      onChange={(e) =>
+                        setSelectedRange("start", Number(e.target.value))
+                      }
+                    />
+                  </label>
+                  <label>
+                    End{" "}
+                    <input
+                      aria-label="Trim end"
+                      type="range"
+                      min="0"
+                      max={duration}
+                      step="0.1"
+                      value={selected.end}
+                      onChange={(e) =>
+                        setSelectedRange("end", Number(e.target.value))
+                      }
+                    />
+                  </label>
                 </div>
               )}
-            </div>
-          )}
-          {sidebar === "exports" && (
-            <ExportsPane
-              exports={exports.filter(
-                (item) =>
-                  item.project_id === project?.id && item.kind === "export_job",
+            </main>
+            <aside className="right-panel">
+              <div className="right-tabs">
+                {(["clips", "transcript", "connections"] as const).map(
+                  (tab) => (
+                    <button
+                      key={tab}
+                      className={sidebar === tab ? "active" : ""}
+                      onClick={() => setSidebar(tab)}
+                    >
+                      {tab === "clips" ? (
+                        <Layers3 size={15} />
+                      ) : tab === "transcript" ? (
+                        <MessageSquareText size={15} />
+                      ) : (
+                        <Link2 size={15} />
+                      )}
+                      <span>
+                        {tab === "connections"
+                          ? "B-roll"
+                          : tab === "clips"
+                            ? "Clips"
+                            : "Transcript"}
+                      </span>
+                      {tab === "clips" && clips.length > 0 && (
+                        <b>{clips.length}</b>
+                      )}
+                    </button>
+                  ),
+                )}
+              </div>
+              {sidebar === "clips" && (
+                <div className="clips-pane">
+                  <div className="clips-toolbar">
+                    <div className="pane-title">
+                      Clip library <span>{clips.length}</span>
+                    </div>
+                    <button
+                      className="icon-button"
+                      aria-label="Add clip"
+                      onClick={addClip}
+                    >
+                      <Plus size={17} />
+                    </button>
+                  </div>
+                  {clips.length > 0 && (
+                    <>
+                      <div className="clip-search">
+                        <Search size={14} />
+                        <input
+                          placeholder="Search clips"
+                          value={search}
+                          onChange={(e) => setSearch(e.target.value)}
+                        />
+                        {search && (
+                          <button
+                            aria-label="Clear clip search"
+                            onClick={() => setSearch("")}
+                          >
+                            ×
+                          </button>
+                        )}
+                      </div>
+                      <div
+                        className="clip-filters"
+                        role="tablist"
+                        aria-label="Clip filters"
+                      >
+                        {(
+                          [
+                            "all",
+                            "smart",
+                            "drafts",
+                            "reviewed",
+                            "exported",
+                          ] as const
+                        ).map((filter) => (
+                          <button
+                            key={filter}
+                            className={clipFilter === filter ? "active" : ""}
+                            onClick={() => setClipFilter(filter)}
+                          >
+                            {filter === "all"
+                              ? "All"
+                              : filter === "smart"
+                                ? "Smart suggestions"
+                                : filter === "drafts"
+                                  ? "Drafts"
+                                  : filter === "reviewed"
+                                    ? "Reviewed"
+                                    : "Exported"}
+                          </button>
+                        ))}
+                      </div>
+                      {clips.some(
+                        (clip) => clip.reason || clip.score !== undefined,
+                      ) && (
+                        <div className="suggestion-toolbar">
+                          <span>Suggestions</span>
+                          <button
+                            className="text-button"
+                            disabled={isBusy}
+                            onClick={() => setShowSetup(true)}
+                          >
+                            <Plus size={12} /> Generate more
+                          </button>
+                        </div>
+                      )}
+                    </>
+                  )}
+                  <div className="clip-list">
+                    {filteredClips.length === 0 ? (
+                      <div className="no-clips">
+                        <div className="empty-list-icon">
+                          <Scissors size={17} />
+                        </div>
+                        <strong>
+                          {clips.length
+                            ? "No clips match this view"
+                            : "No clips yet"}
+                        </strong>
+                        <span>
+                          {clips.length
+                            ? "Clear the search or switch between All, Drafts, Reviewed, and Exported."
+                            : "Set up your moments, camera and captions, then generate clips."}
+                        </span>
+                        {!clips.length && (
+                          <button className="outline-button" onClick={() => setShowSetup(true)}>
+                            <Plus size={14} /> Set up clips
+                          </button>
+                        )}
+                      </div>
+                    ) : (
+                      filteredClips.map((c) => (
+                        <ClipRow
+                          key={c.id}
+                          number={clips.findIndex((item) => item.id === c.id) + 1}
+                          clip={c}
+                          duration={duration}
+                          active={c.id === selectedId}
+                          onSelect={() => {
+                            if (c.id !== selectedId) {
+                              proofJobId.current = "";
+                              setProofUrl("");
+                            }
+                            setSelectedId(c.id);
+                            seek(c.start, true);
+                          }}
+                          onPatch={(p) => patchClip(c.id, p)}
+                          onReview={() =>
+                            patchClip(c.id, { reviewed: !c.reviewed })
+                          }
+                          onSuggestionStatus={(suggestion_status) =>
+                            patchClip(c.id, { suggestion_status })
+                          }
+                          onDelete={() => deleteClip(c.id)}
+                          onDuplicate={() => duplicateClip(c)}
+                          onWork={() => workOnClip(c)}
+                        />
+                      ))
+                    )}
+                  </div>
+                  {clips.length > 0 && (
+                    <div className="clips-footer">
+                      <label className="check-row">
+                        <input
+                          type="checkbox"
+                          checked={selectedCount === clips.length}
+                          onChange={(e) => {
+                            const checked = e.target.checked;
+                            clips.forEach((c) => {
+                              void patchClip(c.id, { selected: checked });
+                            });
+                          }}
+                        />
+                        <span>Select all clips</span>
+                      </label>
+                      <button
+                        className="export-button"
+                        disabled={!selectedCount || isBusy}
+                        onClick={() =>
+                          exportClips(
+                            clips.filter((c) => c.selected).map((c) => c.id),
+                          )
+                        }
+                      >
+                        <Download size={15} /> Export{" "}
+                        {selectedCount ? `${selectedCount} selected` : "all"}
+                      </button>
+                      <div className="clip-bulk-actions">
+                        <button
+                          className="text-button danger-text"
+                          disabled={!selectedCount || isBusy}
+                          onClick={() =>
+                            bulkDelete(
+                              clips
+                                .filter((clip) => clip.selected)
+                                .map((clip) => clip.id),
+                            )
+                          }
+                        >
+                          Remove selected
+                        </button>
+                        <button
+                          className="text-button danger-text"
+                          disabled={!clips.length || isBusy}
+                          onClick={() =>
+                            bulkDelete(clips.map((clip) => clip.id))
+                          }
+                        >
+                          Clear clips
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
               )}
-              jobs={jobs.filter(
-                (item) =>
-                  item.project_id === project?.id && item.kind === "export_job",
+              {sidebar === "transcript" && (
+                <TranscriptPanel
+                  projectId={
+                    project
+                      ? `${project.id}:${selected?.transcript ? selected.id : "source"}`
+                      : ""
+                  }
+                  segments={
+                    (selected?.transcript ??
+                      project?.transcript ??
+                      []) as TranscriptSegment[]
+                  }
+                  busy={isBusy}
+                  onSeek={(time) => seek(time, true)}
+                  onSave={async (segments) => {
+                    if (!project) return;
+                    if (!(await flushQueuedSaves())) return;
+                    const saved = await api<Project>(
+                      `/projects/${project.id}/transcript`,
+                      {
+                        method: "PUT",
+                        body: JSON.stringify({
+                          segments,
+                          clip_id: selected?.transcript
+                            ? selected.id
+                            : undefined,
+                        }),
+                      },
+                    );
+                    setProject(saved);
+                    setClips(saved.clips || []);
+                    proofJobId.current = "";
+                    setProofUrl("");
+                    setHistory([]);
+                    setFuture([]);
+                    setNotice("Transcript saved");
+                  }}
+                  onCreateClip={async (start, end, title) => {
+                    if (!project) return;
+                    const created = await api<Clip>(
+                      `/projects/${project.id}/clips`,
+                      {
+                        method: "POST",
+                        body: JSON.stringify({
+                          ...DEFAULT_CLIP,
+                          title,
+                          start,
+                          end,
+                          selected: true,
+                          source_clip_id: selected?.transcript
+                            ? selected.id
+                            : undefined,
+                        }),
+                      },
+                    );
+                    proofJobId.current = "";
+                    setProofUrl("");
+                    setClips((list) => [...list, created]);
+                    setSelectedId(created.id);
+                    seek(start, true);
+                  }}
+                  onTranscribe={transcribe}
+                />
               )}
-              onExport={() => exportClips(clips.map((c) => c.id))}
-              onCancel={cancelJob}
-              onRetry={retryJob}
-            />
-          )}
-          {sidebar === "transcript" && (
-            <TranscriptPanel
-              projectId={
-                project
-                  ? `${project.id}:${selected?.transcript ? selected.id : "source"}`
-                  : ""
-              }
-              segments={
-                (selected?.transcript ??
-                  project?.transcript ??
-                  []) as TranscriptSegment[]
-              }
-              busy={isBusy}
-              onSeek={(time) => seek(time, true)}
-              onSave={async (segments) => {
-                if (!project) return;
-                if (!(await flushQueuedSaves())) return;
-                const saved = await api<Project>(
-                  `/projects/${project.id}/transcript`,
-                  {
-                    method: "PUT",
-                    body: JSON.stringify({
-                      segments,
-                      clip_id: selected?.transcript ? selected.id : undefined,
-                    }),
-                  },
-                );
-                setProject(saved);
-                setClips(saved.clips || []);
-                proofJobId.current = "";
-                setProofUrl("");
-                setHistory([]);
-                setFuture([]);
-                setNotice("Transcript saved");
-              }}
-              onCreateClip={async (start, end, title) => {
-                if (!project) return;
-                const created = await api<Clip>(
-                  `/projects/${project.id}/clips`,
-                  {
-                    method: "POST",
-                    body: JSON.stringify({
-                      ...DEFAULT_CLIP,
-                      title,
-                      start,
-                      end,
-                      selected: true,
-                      source_clip_id: selected?.transcript
-                        ? selected.id
-                        : undefined,
-                    }),
-                  },
-                );
-                proofJobId.current = "";
-                setProofUrl("");
-                setClips((list) => [...list, created]);
-                setSelectedId(created.id);
-                seek(start, true);
-              }}
-              onTranscribe={transcribe}
-            />
-          )}
-          {sidebar === "connections" && (
-            <ConnectionsPane
-              health={health}
-              busy={isBusy}
-              prompt={generationPrompt}
-              setPrompt={setGenerationPrompt}
-              duration={generationDuration}
-              setDuration={setGenerationDuration}
-              onGenerate={generateBroll}
-            />
-          )}
-        </aside>
+              {sidebar === "connections" && (
+                <ConnectionsPane
+                  health={health}
+                  busy={isBusy}
+                  prompt={generationPrompt}
+                  setPrompt={setGenerationPrompt}
+                  duration={generationDuration}
+                  setDuration={setGenerationDuration}
+                  onGenerate={generateBroll}
+                />
+              )}
+            </aside>
+          </div>
+          </>}
+        </div>
       </div>
+      <GuidedTour
+        page={page}
+        onNavigate={navigatePage}
+        onReveal={(target) => {
+          if (target === "editor-generation") setShowSetup(true);
+          else if (target.startsWith("editor-")) setShowSetup(false);
+          if (target === "editor-captions") setInspector("captions");
+        }}
+        hasProject={!!project}
+        replayToken={tourReplay}
+      />
+      {subtitleDraft && (
+        <div className="workspace-modal-backdrop">
+          <section
+            className="workspace-dialog"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Import subtitles"
+          >
+            <h2>Import {subtitleDraft.length} subtitle passages?</h2>
+            <p>
+              This replaces the source transcript. Existing clip-specific
+              corrections and manual caption text stay unchanged.
+            </p>
+            <footer>
+              <button
+                className="secondary-action"
+                onClick={() => setSubtitleDraft(null)}
+              >
+                Cancel
+              </button>
+              <button className="primary-action" onClick={applySubtitles}>
+                Import subtitles
+              </button>
+            </footer>
+          </section>
+        </div>
+      )}
       {(job?.status === "queued" || job?.status === "running") && (
         <div className="job-toast">
           <LoaderCircle className="spin" size={16} />
           <div>
             <strong>{job.stage || "Working locally"}</strong>
             <span>{Math.round(job.progress || 0)}% · you can keep editing</span>
-            {job.warning && <small className="job-warning">{job.warning}</small>}
+            {job.warning && (
+              <small className="job-warning">{job.warning}</small>
+            )}
           </div>
           <div className="job-progress">
             <i style={{ width: `${job.progress || 0}%` }} />
@@ -2124,7 +2429,7 @@ export default function App() {
           <button onClick={() => setNotice("")}>×</button>
         </div>
       )}
-      {restoreAvailable && (
+      {restoreAvailable && page === "editor" && (
         <div className="notice undo-notice">
           <span>Removed clips stay recoverable.</span>
           <button onClick={restoreLastBatch}>Undo remove</button>
@@ -2142,19 +2447,19 @@ export default function App() {
           onUrl={setUrl}
           onFile={importFile}
           onYoutube={importYoutube}
+          onInspect={(sourceUrl, signal) =>
+            api("/sources/youtube/inspect", {
+              method: "POST",
+              signal,
+              body: JSON.stringify({ url: sourceUrl }),
+            })
+          }
           busy={isBusy || importSubmitting}
           uploading={importSubmitting}
           onClose={() => setNewProjectOpen(false)}
           error={error}
         />
       )}
-      <ProviderSettings
-        api={api}
-        open={settingsOpen}
-        onClose={() => setSettingsOpen(false)}
-        onHealth={setHealth}
-        onNotice={setNotice}
-      />
     </div>
   );
 }
@@ -2164,12 +2469,14 @@ function NumberSetting({
   min,
   max,
   disabled,
+  step = 1,
   onChange,
 }: {
   value: number;
   min: number;
   max: number;
   disabled?: boolean;
+  step?: number;
   onChange: (value: number) => void;
 }) {
   const [draft, setDraft] = useState(String(value));
@@ -2177,7 +2484,7 @@ function NumberSetting({
   function commit() {
     const next =
       draft.trim() && Number.isFinite(Number(draft))
-        ? clamp(Math.round(Number(draft)), min, max)
+        ? clamp(Math.round(Number(draft) / step) * step, min, max)
         : value;
     setDraft(String(next));
     onChange(next);
@@ -2187,6 +2494,7 @@ function NumberSetting({
       type="number"
       min={min}
       max={max}
+      step={step}
       disabled={disabled}
       value={draft}
       onChange={(event) => setDraft(event.target.value)}
@@ -2195,159 +2503,6 @@ function NumberSetting({
         if (event.key === "Enter") event.currentTarget.blur();
       }}
     />
-  );
-}
-
-function AnalysisControls({
-  options,
-  groqAvailable,
-  onOpenSettings,
-  onModeChange,
-  onDurationChange,
-  onToleranceChange,
-  onStrictMaxChange,
-  onMaxClipsChange,
-  onTopicChange,
-  onTranscriptChange,
-  onProviderChange,
-  onAnalyze,
-  busy,
-}: {
-  options: AnalysisOptions;
-  groqAvailable: boolean;
-  onOpenSettings: () => void;
-  onModeChange: (value: "full" | "smart") => void;
-  onDurationChange: (value: number) => void;
-  onToleranceChange: (value: number) => void;
-  onStrictMaxChange: (value: number | null) => void;
-  onMaxClipsChange: (value: number) => void;
-  onTopicChange: (value: string) => void;
-  onTranscriptChange: (value: boolean) => void;
-  onProviderChange: (value: "local" | "groq") => void;
-  onAnalyze: () => void;
-  busy: boolean;
-}) {
-  return (
-    <section className={`settings-section analysis-controls ${options.mode}`}>
-      <div className="section-title">
-        <span>Clip generation</span>
-        <Info size={13} />
-      </div>
-      <div className="analysis-modes">
-        <button
-          className={options.mode === "full" ? "active" : ""}
-          onClick={() => onModeChange("full")}
-        >
-          <strong>Full video</strong>
-          <small>Review every candidate from the source.</small>
-        </button>
-        <button
-          className={options.mode === "smart" ? "active" : ""}
-          onClick={() => onModeChange("smart")}
-        >
-          <strong>Smart highlights</strong>
-          <small>Rank a focused subset within your limit.</small>
-        </button>
-      </div>
-      <div className="analysis-grid">
-        <label>
-          Approx. duration
-          <NumberSetting
-            min={5}
-            max={300}
-            value={options.targetDuration}
-            onChange={onDurationChange}
-          />
-          <span>seconds</span>
-        </label>
-        <label className="smart-only">
-          Tolerance
-          <NumberSetting
-            min={10}
-            max={50}
-            value={Math.round(options.tolerance * 100)}
-            onChange={(value) => onToleranceChange(value / 100)}
-          />
-          <span>± percent</span>
-        </label>
-        <label className="smart-only strict-max-field">
-          <span className="strict-max-label">
-            <input
-              type="checkbox"
-              checked={options.strictMax !== null}
-              onChange={(event) =>
-                onStrictMaxChange(event.target.checked ? options.targetDuration : null)
-              }
-            />
-            Strict maximum
-          </span>
-          <NumberSetting
-            min={1}
-            max={300}
-            value={options.strictMax ?? options.targetDuration}
-            disabled={options.strictMax === null}
-            onChange={onStrictMaxChange}
-          />
-          <span>seconds</span>
-        </label>
-        <label className="smart-only">
-          Max clips
-          <NumberSetting
-            min={1}
-            max={20}
-            value={options.maxClips}
-            onChange={onMaxClipsChange}
-          />
-          <span>clips</span>
-        </label>
-      </div>
-      <label className="analysis-topic">
-        Topic or angle
-        <input
-          value={options.topic}
-          onChange={(event) => onTopicChange(event.target.value)}
-          placeholder="e.g. arrival, food, street detail"
-        />
-      </label>
-      <div className="analysis-options">
-        <label>
-          <input
-            type="checkbox"
-            checked={options.useTranscript}
-            onChange={(event) => onTranscriptChange(event.target.checked)}
-          />{" "}
-          Use transcript highlights
-        </label>
-        <label>
-          Provider
-          <select
-            value={options.provider}
-            onChange={(event) =>
-              onProviderChange(event.target.value as "local" | "groq")
-            }
-          >
-            <option value="local">Local</option>
-            <option value="groq" disabled={!groqAvailable}>
-              Groq{groqAvailable ? "" : " · configure in settings"}
-            </option>
-          </select>
-        </label>
-      </div>
-      {!groqAvailable && (
-        <button className="analysis-link" onClick={onOpenSettings}>
-          Set up Groq in provider settings
-        </button>
-      )}
-      <p className="analysis-note">
-        {options.mode === "smart"
-          ? "Smart highlights selects up to the limit and keeps existing clips and edits."
-          : "Full video analyzes every candidate across the source."}
-      </p>
-      <button className="lime-button full" onClick={onAnalyze} disabled={busy}>
-        <WandSparkles size={15} />{" "}
-        {options.mode === "smart" ? "Find highlights" : "Analyze full video"}
-      </button>
-    </section>
   );
 }
 
@@ -2360,6 +2515,7 @@ function StatusPill({ value }: { value: string }) {
 }
 function ClipRow({
   clip,
+  number,
   duration,
   active,
   onSelect,
@@ -2371,6 +2527,7 @@ function ClipRow({
   onSuggestionStatus,
 }: {
   clip: Clip;
+  number: number;
   duration: number;
   active: boolean;
   onSelect: () => void;
@@ -2379,9 +2536,7 @@ function ClipRow({
   onDuplicate: () => void;
   onWork: () => void;
   onReview: () => void;
-  onSuggestionStatus: (
-    status: "pending" | "kept" | "discarded",
-  ) => void;
+  onSuggestionStatus: (status: "pending" | "kept" | "discarded") => void;
 }) {
   const [editing, setEditing] = useState(false);
   const [draftStart, setDraftStart] = useState(String(clip.start));
@@ -2412,7 +2567,7 @@ function ClipRow({
       onClick={onSelect}
     >
       <div className="clip-thumbnail">
-        <div className="thumb-bars" />
+        <b className="clip-number">Clip {number}</b>
         <span>
           {fmt(clip.start)} → {fmt(clip.end)}
         </span>
@@ -2445,6 +2600,12 @@ function ClipRow({
             </strong>
           )}
           <button
+            title="Rename clip" aria-label={`Rename clip ${number}`}
+            className="row-menu"
+            onClick={(event) => { event.stopPropagation(); setEditing(true); }}>
+            <Pencil size={14} />
+          </button>
+          <button
             title="Duplicate clip"
             className="row-menu"
             onClick={(e) => {
@@ -2473,18 +2634,13 @@ function ClipRow({
               : clip.reviewed
                 ? "Reviewed"
                 : "Draft"}
-            </span>
+          </span>
           {active && <b className="clip-editing-label">Editing</b>}
           {clip.reviewed && <b className="clip-reviewed-label">✓</b>}
         </div>
         {(clip.reason || clip.score !== undefined) && (
           <div className="clip-reason">
-            <span>
-              {clip.reason || "Suggested highlight"}
-              {clip.score !== undefined && (
-                <b>{Math.round(clip.score * 100)}%</b>
-              )}
-            </span>
+            <span>{clip.reason || "Suggested highlight"}</span>
             <span className="suggestion-status">
               {clip.suggestion_status === "kept"
                 ? "Kept"
@@ -2581,116 +2737,6 @@ function ClipRow({
         </div>
       </div>
     </article>
-  );
-}
-function jobTitle(kind?: string) {
-  return (
-    (
-      {
-        preview_job: "Rendered proof",
-        export_job: "Clip export",
-        upload_job: "Import source",
-        youtube_job: "YouTube import",
-        demo_job: "Tracking demo",
-        analyze_job: "Clip analysis",
-        transcribe_job: "Transcription",
-        higgsfield_job: "B-roll generation",
-      } as Record<string, string>
-    )[kind || ""] || "Background job"
-  );
-}
-function ExportsPane({
-  exports,
-  jobs,
-  onExport,
-  onCancel,
-  onRetry,
-}: {
-  exports: Job[];
-  jobs: Job[];
-  onExport: () => void;
-  onCancel: (id: string) => void;
-  onRetry: (id: string) => void;
-}) {
-  const rows = jobs.length ? jobs : exports;
-  return (
-    <div className="exports-pane">
-      <div className="pane-heading">
-        <div>
-          <div className="pane-title">Exports</div>
-          <p>Finished renders and live jobs</p>
-        </div>
-        <button className="export-button compact" onClick={onExport}>
-          <Download size={15} /> Export all
-        </button>
-      </div>
-      {rows.length === 0 ? (
-        <div className="export-intro">
-          <div className="export-icon">
-            <Download size={20} />
-          </div>
-          <strong>Nothing rendered yet</strong>
-          <span>Select clips and export when the cut is ready.</span>
-          <button className="export-button" onClick={onExport}>
-            <Download size={15} /> Export all clips
-          </button>
-        </div>
-      ) : (
-        <div className="job-list">
-          {rows.map((x) => (
-            <div className="export-item" key={x.id}>
-              <div className="job-info">
-                <FileVideo size={16} />
-                <span>
-                  <strong>
-                    {x.clip_titles?.join(", ") || jobTitle(x.kind)}
-                  </strong>
-                  <small>
-                    {x.created_at
-                      ? `${new Date(x.created_at).toLocaleString()} · `
-                      : ""}
-                    {x.status === "done" ? "Exported" : x.stage || x.status} ·{" "}
-                    {Math.round(x.progress || (x.status === "done" ? 100 : 0))}%
-                  </small>
-                  {x.error && (
-                    <small style={{ color: "#b94d40", whiteSpace: "normal" }}>
-                      {x.error}
-                    </small>
-                  )}
-                  {x.warning && (
-                    <small className="job-warning">{x.warning}</small>
-                  )}
-                </span>
-              </div>
-              <div className="job-actions">
-                {x.download_url && x.status === "done" && (
-                  <a
-                    href={x.download_url}
-                    download
-                    aria-label="Download export"
-                  >
-                    <Download size={14} />
-                  </a>
-                )}
-                {(x.status === "queued" || x.status === "running") && (
-                  <button title="Cancel job" onClick={() => onCancel(x.id)}>
-                    <Ban size={14} />
-                  </button>
-                )}
-                {(x.status === "error" || x.status === "cancelled") && (
-                  <button title="Retry job" onClick={() => onRetry(x.id)}>
-                    <RotateCcw size={14} />
-                  </button>
-                )}
-                {x.status === "done" && (
-                  <Check size={15} className="job-done" />
-                )}
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
   );
 }
 function ConnectionsPane({

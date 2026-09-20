@@ -32,6 +32,19 @@ _MODEL_CACHE: OrderedDict[tuple[str, str, str, str], Any] = OrderedDict()
 _MODEL_LOCK = threading.Lock()
 _MODEL_CACHE_LIMIT = 1
 
+# Conservative compressed download estimates.  These are used only to decide
+# whether it is safe to start a download; a cached model is always preferred.
+MODEL_REQUIREMENTS_MB = {
+    # Leave room for extraction, CTranslate2 buffers, and an interrupted
+    # download; the model itself is smaller than this safety allowance.
+    "tiny": 400,
+    "base": 500,
+    "small": 1_000,
+    "medium": 2_000,
+    "large-v3": 4_000,
+    "large-v3-turbo": 1_500,
+}
+
 
 def _emit(progress: Progress, message: str, percent: int) -> None:
     """Report progress and honor both callback cancellation and job cancellation."""
@@ -89,6 +102,9 @@ def effective_options(options: dict | None = None) -> dict:
         .lower()
         .strip()
     )
+    automatic_quality = quality == "auto"
+    if automatic_quality:
+        quality = "balanced"
     if quality not in QUALITY_MODELS:
         raise ValueError("quality must be fast, balanced, or accurate")
     if dialect == "algerian" and language == "auto":
@@ -150,6 +166,7 @@ def effective_options(options: dict | None = None) -> dict:
         "provider": provider,
         "groq_model": groq_model,
         "cpu_threads": cpu_threads,
+        "_automatic_quality": automatic_quality,
     }
 
 
@@ -231,19 +248,109 @@ def _model_is_cached(cache_root: Path, model: str) -> bool:
     return False
 
 
+def _free_bytes(path: Path) -> int:
+    try:
+        probe = path
+        while not probe.exists() and probe.parent != probe:
+            probe = probe.parent
+        return int(shutil.disk_usage(probe).free)
+    except OSError:
+        return 0
+
+
+def model_readiness(
+    source: Path, options: dict | None = None
+) -> dict[str, Any]:
+    """Describe whether local speech can run without starting a download.
+
+    ``automatic`` is true only when the caller did not select a model or
+    quality.  This lets the one-click path pick a usable cached/downloadable
+    model while preserving an explicit Accurate/large model request.
+    """
+    raw = options if isinstance(options, dict) else {}
+    effective = effective_options(raw)
+    cache_root = _cache_root(source)
+    requested = effective["model"]
+    explicit = any(key in raw for key in ("model", "quality", "transcription_quality"))
+    automatic_request = bool(raw.get("_automatic_quality"))
+    if str(raw.get("quality", raw.get("transcription_quality", ""))).lower().strip() == "auto":
+        explicit = False
+        automatic_request = True
+    if automatic_request:
+        explicit = False
+    if not explicit and not automatic_request and (value("CLIPFLOW_WHISPER_MODEL", "") or value("CLIPFLOW_TRANSCRIPTION_QUALITY", "")):
+        explicit = True
+    cached = {model: _model_is_cached(cache_root, model) for model in LOCAL_MODELS}
+    free_bytes = _free_bytes(cache_root)
+    fits = {
+        model: cached[model]
+        or free_bytes >= MODEL_REQUIREMENTS_MB[model] * 1024 * 1024
+        for model in LOCAL_MODELS
+    }
+    if explicit:
+        selected = requested if fits.get(requested, False) else None
+    else:
+        # Automatic mode prefers a cached model, avoiding needless downloads.
+        # Among cached models, use the best one no larger than requested.
+        requested_rank = LOCAL_MODELS.index(requested)
+        cached_usable = [
+            model for model in LOCAL_MODELS[: requested_rank + 1] if cached[model]
+        ]
+        selected = cached_usable[-1] if cached_usable else (
+            requested if fits.get(requested, False) else next(
+                (model for model in LOCAL_MODELS if fits[model]), None
+            )
+        )
+    warning = ""
+    if selected and selected != requested:
+        warning = (
+            f"Automatic mode selected {selected} for this draft. "
+            "Recognition quality may be lower; choose Balanced or Accurate for a larger model."
+        )
+    return {
+        "provider": "local",
+        "cache_root": str(cache_root),
+        "requested_model": requested,
+        "selected_model": selected,
+        "requested_quality": effective["quality"],
+        "cached_models": [model for model in LOCAL_MODELS if cached[model]],
+        "free_bytes": free_bytes,
+        "ready": selected is not None,
+        "automatic": not explicit,
+        "warning": warning,
+        "required_bytes": MODEL_REQUIREMENTS_MB[requested] * 1024 * 1024,
+    }
+
+
+def resolve_local_options(source: Path, options: dict) -> tuple[dict, str]:
+    """Return effective options and a truthful quality warning, if any."""
+    readiness = model_readiness(source, options)
+    if not readiness["ready"]:
+        requested = readiness["requested_model"]
+        required_mb = MODEL_REQUIREMENTS_MB[requested]
+        if readiness["automatic"]:
+            raise RuntimeError(
+                f"No local Whisper model is cached and there is not enough free space to download one. "
+                f"The smallest model needs about {MODEL_REQUIREMENTS_MB['tiny']} MB; free space is "
+                f"{readiness['free_bytes'] // (1024 * 1024)} MB. Set CLIPFLOW_MODEL_CACHE to a larger drive or choose Groq."
+            )
+        raise RuntimeError(
+            f"Whisper {requested} is not cached and needs about {max(1, required_mb // 1000)} GB free. "
+            "Set CLIPFLOW_MODEL_CACHE to a larger drive or choose Fast local transcription or Groq."
+        )
+    resolved = dict(options)
+    resolved["model"] = readiness["selected_model"]
+    resolved["_automatic_quality"] = readiness["automatic"]
+    return resolved, readiness["warning"]
+
+
 def _preflight_model(cache_root: Path, model: str) -> None:
-    if model == "tiny" or _model_is_cached(cache_root, model):
+    if _model_is_cached(cache_root, model):
         return
     # Approximate compressed model footprints; this avoids starting a multi-GB
     # download on the small system disk while still allowing an explicitly
     # configured larger cache drive to fetch a missing model.
-    required = {
-        "base": 500,
-        "small": 700,
-        "medium": 2_000,
-        "large-v3": 4_000,
-        "large-v3-turbo": 1_500,
-    }.get(model, 1_000)
+    required = MODEL_REQUIREMENTS_MB.get(model, 1_000)
     try:
         probe = cache_root
         while not probe.exists() and probe.parent != probe:
@@ -301,6 +408,9 @@ def _local(
     source: Path, duration: float, progress: Progress, options: dict | None = None
 ) -> list[dict]:
     effective = options or effective_options({"provider": "local"})
+    effective, warning = resolve_local_options(source, effective)
+    if warning:
+        _emit(progress, f"Draft transcription: {warning}", 2)
     model = _load_local_model(source, effective, progress)
     _emit(
         progress,

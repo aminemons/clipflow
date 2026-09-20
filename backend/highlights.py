@@ -113,7 +113,10 @@ def _topic_score(text: str, terms: set[str]) -> float:
     if not terms:
         return 0.0
     words = set(_words(text))
-    return min(1.0, len(words & terms) / max(1.0, min(3.0, len(terms))))
+    # Requiring at most three matches made a long topic prompt score as a
+    # perfect hit after only three incidental words.  Five keeps a one-word
+    # topic exact while making longer prompts earn their relevance score.
+    return min(1.0, len(words & terms) / max(1.0, min(5.0, len(terms))))
 
 
 def _novelty(text: str, prior: set[str]) -> float:
@@ -298,13 +301,25 @@ def _rank_candidates(
         candidate["topic_terms"] = bool(terms)
         candidate["novelty"] = _novelty(text, seen)
         seen.update(_words(text))
+        target = candidate.get("target")
+        try:
+            target_value = float(target)
+            duration = float(candidate.get("duration", 0.0))
+            duration_fit = max(
+                0.0,
+                1.0 - abs(duration - target_value) / max(target_value, 1.0),
+            )
+        except (TypeError, ValueError):
+            duration_fit = 0.0
+        candidate["duration_fit"] = duration_fit
         # Topic/relevance dominates; speech and lexical variety make silent or
         # repetitive intervals naturally rank below useful passages.
         candidate["score"] = round(
             0.42 * candidate["topic"]
-            + 0.24 * candidate["density"]
-            + 0.24 * candidate["info"]
-            + 0.10 * candidate["novelty"],
+            + 0.22 * candidate["density"]
+            + 0.20 * candidate["info"]
+            + 0.10 * candidate["novelty"]
+            + 0.06 * duration_fit,
             4,
         )
     return sorted(candidates, key=lambda x: (-x["score"], x["start"]))
@@ -463,6 +478,25 @@ def _hosted_rank(
         raise HighlightError("Groq returned malformed highlight JSON") from exc
 
 
+def _model_rank(candidates, topic, max_clips, provider, progress):
+    from .language_models import generate_json
+    ranked = _rank_candidates(candidates, topic)[:120]
+    _cancel(progress, "Ranking transcript passages", 70)
+    data = generate_json(provider, 'Select useful candidate IDs. Return {"ids":[integer]}. Do not invent IDs or timestamps.',
+        {"topic": topic[:500], "max_clips": max_clips, "candidates": [{"id":c["id"], "text":c["text"][:600]} for c in ranked]})
+    ids = data.get("ids")
+    if not isinstance(ids, list):
+        raise HighlightError("The provider did not return highlight IDs.")
+    by_id = {c["id"]: c for c in ranked}
+    chosen = []
+    for ident in ids:
+        if type(ident) is int and ident in by_id and by_id[ident] not in chosen:
+            chosen.append(by_id[ident])
+    if not chosen:
+        raise HighlightError("The provider returned no valid candidates. Try another topic or local analysis.")
+    return _select(chosen, max_clips, topic)
+
+
 def suggest_highlights(
     source: Path,
     transcript: list[dict],
@@ -484,7 +518,7 @@ def suggest_highlights(
     """
     source = Path(source)
     provider_name = str(provider or "local").lower()
-    if provider_name not in {"local", "groq"}:
+    if provider_name not in {"local", "groq", "openai", "anthropic", "gemini", "ollama"}:
         raise HighlightError(f"Unknown highlight provider: {provider}")
     rows = _clean_transcript(transcript)
     if sentence_context not in {"keep", "discard"}:
@@ -521,7 +555,8 @@ def suggest_highlights(
     selected = (
         _hosted_rank(candidates, topic, max_clips, progress)
         if provider_name == "groq"
-        else _select(candidates, max_clips, topic)
+        else _model_rank(candidates, topic, max_clips, provider_name, progress)
+        if provider_name != "local" else _select(candidates, max_clips, topic)
     )
     result = []
     duration = _duration(source, rows)

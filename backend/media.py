@@ -12,6 +12,23 @@ import time
 import zipfile
 from pathlib import Path
 from typing import Callable
+from .caption_layout import caption_cues, font_name, fonts_directory
+
+from .camera import (
+    CameraController,
+    CameraPoint,
+    TrackedTarget,
+    camera_settings,
+    choose_target,
+    interpolate_keyframes,
+)
+from .vision_framing import (
+    analyze_frame,
+    boxes_fit_viewport,
+    full_frame_view,
+    gemini_vision_plans,
+    safe_zoom_for_boxes,
+)
 
 FFMPEG = shutil.which("ffmpeg") or "ffmpeg"
 FFPROBE = shutil.which("ffprobe") or "ffprobe"
@@ -223,6 +240,9 @@ def _scene_points(
     Decoding every full-resolution frame in Python made a 20-minute source
     appear hung. FFmpeg still decodes the source once, but emits only one
     160x90 grayscale frame per second, keeping Python work and memory bounded.
+    Do not use ``-skip_frame nokey`` here: that decoder option discards all
+    non-keyframes, so the ``fps=1`` stream would compare GOP/keyframe samples
+    instead of adjacent seconds and could miss a real cut between keyframes.
     """
     try:
         import numpy as np  # type: ignore
@@ -236,8 +256,6 @@ def _scene_points(
                 "-hide_banner",
                 "-loglevel",
                 "error",
-                "-skip_frame",
-                "nokey",
                 "-i",
                 str(path),
                 "-vf",
@@ -370,6 +388,28 @@ def _select_face_x(
     return max(centers, key=lambda item: item[1])[0]
 
 
+def _face_zoom_target(
+    box_height: float,
+    sample_height: float,
+    crop_height: float,
+    source_height: float,
+    ceiling: float,
+) -> float:
+    """Return a bounded zoom that makes a face about 30% of the crop height."""
+    try:
+        box = float(box_height)
+        sample = float(sample_height)
+        crop = float(crop_height)
+        source = float(source_height)
+        limit = float(ceiling)
+    except (TypeError, ValueError):
+        return 1.0
+    if not all(math.isfinite(value) and value > 0 for value in (box, sample, crop, source)):
+        return 1.0
+    desired = 0.30 * (crop / source) / (box / sample)
+    return max(1.0, min(1.5, limit, desired))
+
+
 def track_focus(
     path: str | Path, start: float, end: float, subject: str = "auto"
 ) -> tuple[float, float]:
@@ -447,6 +487,64 @@ def track_focus(
     return 0.5, 0.5
 
 
+ASPECT_RATIOS = {
+    "9:16": (9, 16),
+    "1:1": (1, 1),
+    "4:5": (4, 5),
+    "16:9": (16, 9),
+}
+
+
+def _sample_clip_frames(
+    source: str | Path, start: float, end: float, *, limit: int = 6
+) -> list[object]:
+    """Read a bounded set of frames for an explicitly selected remote provider."""
+
+    import cv2  # type: ignore
+
+    cap = cv2.VideoCapture(str(source))
+    if not cap.isOpened():
+        return []
+    count = max(1, min(int(limit), 6))
+    frames: list[object] = []
+    try:
+        for index in range(count):
+            fraction = index / max(1, count - 1)
+            cap.set(cv2.CAP_PROP_POS_MSEC, (start + (end - start) * fraction) * 1000.0)
+            ok, frame = cap.read()
+            if ok and frame is not None:
+                frames.append(frame)
+    finally:
+        cap.release()
+    return frames
+
+
+def _gemini_clip_plans(
+    source: str | Path, start: float, end: float, progress: Progress | None = None
+):
+    frames = _sample_clip_frames(source, start, end, limit=6)
+    if not frames:
+        raise RuntimeError("Could not sample source frames for Gemini framing.")
+    return gemini_vision_plans(frames, progress=progress)
+
+
+def _nearest_remote_plan(plans, frame_index: int, frame_count: int):
+    if not plans:
+        return None
+    max_index = max(int(plan.index) for plan in plans)
+    sample_index = round((frame_index / max(1, frame_count - 1)) * max_index)
+    return min(plans, key=lambda plan: abs(int(plan.index) - sample_index))
+
+
+def aspect_dimensions(clip: dict) -> tuple[int, int]:
+    """Return an even output size while keeping resolution as the width."""
+    width = int(clip.get("resolution") or 720)
+    ratio = str(clip.get("aspect_ratio") or "9:16")
+    numerator, denominator = ASPECT_RATIOS.get(ratio, ASPECT_RATIOS["9:16"])
+    height = int(round(width * denominator / numerator))
+    return width, height + (height % 2)
+
+
 def render_clip(
     source: str | Path,
     clip: dict,
@@ -456,36 +554,81 @@ def render_clip(
 ) -> None:
     start, end = max(0, float(clip["start"])), float(clip["end"])
     duration = max(0.2, end - start)
-    width = int(clip.get("resolution") or 720)
+    width, height = aspect_dimensions(clip)
     framing = clip.get("framing", "follow")
+    aspect = width / height
     vf = [
-        f"scale={width}:-2:force_original_aspect_ratio=decrease",
-        f"pad={width}:{int(width*16/9)}:(ow-iw)/2:(oh-ih)/2:black",
+        f"scale={width}:{height}:force_original_aspect_ratio=decrease",
+        f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:black",
         "format=yuv420p",
     ]
     # Follow uses an OpenCV frame pass below so face/motion tracking really moves the crop.
     if framing == "fit":
         vf = [
-            f"scale={width}:-2:force_original_aspect_ratio=decrease",
-            f"pad={width}:{int(width*16/9)}:(ow-iw)/2:(oh-ih)/2:black",
+            f"scale={width}:{height}:force_original_aspect_ratio=decrease",
+            f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2:black",
             "format=yuv420p",
         ]
     elif framing == "manual":
         fx = max(0.05, min(0.95, float(clip.get("focus_x", 0.5))))
-        # Crop to a 9:16 window in the original frame, then scale; clamp protects portrait sources.
+        _, source_width, source_height, _ = metadata(source)
+        source_aspect = source_width / max(1, source_height)
+        if source_aspect >= aspect:
+            crop_width, crop_height = f"ih*{aspect:.8f}", "ih"
+        else:
+            crop_width, crop_height = "iw", f"iw/{aspect:.8f}"
         vf = [
-            f"crop=ih*9/16:ih:(iw-ow)*{fx}:0",
-            f"scale={width}:{int(width*16/9)}",
+            f"crop={crop_width}:{crop_height}:(iw-ow)*{fx}:(ih-oh)/2",
+            f"scale={width}:{height}",
             "format=yuv420p",
         ]
     if framing == "follow":
-        _render_follow_cv2(source, clip, out, width, progress)
+        _render_follow_cv2(source, clip, out, width, height, progress)
+        _burn_caption(out, clip, srt)
+        _postprocess_effects(out, clip, progress)
+        return
+    # Manual camera paths use the same pixel cropper, but explicitly disable face
+    # and motion detection.  This keeps authored keyframes deterministic while
+    # retaining the historical static manual crop when no camera path is present.
+    try:
+        manual_zoom = float(clip.get("camera_zoom", 1.0))
+    except (TypeError, ValueError):
+        manual_zoom = 1.0
+    if framing == "manual" and (
+        bool(clip.get("camera_keyframes")) or abs(manual_zoom - 1.0) > 1e-9
+    ):
+        _render_follow_cv2(
+            source,
+            clip,
+            out,
+            width,
+            height,
+            progress,
+            auto_tracking=False,
+        )
         _burn_caption(out, clip, srt)
         _postprocess_effects(out, clip, progress)
         return
     caption_file = _caption_ass(out, clip, srt)
-    if caption_file:
-        vf.append(f"ass={_filter_path(caption_file)}")
+    filter_complex = None
+    video_map = "0:v:0"
+    if framing == "blur":
+        caption_path = _filter_path(caption_file) if caption_file else None
+        filter_complex = (
+            f"[0:v]split=2[bg][fg];"
+            f"[bg]scale={width}:{height}:force_original_aspect_ratio=increase,"
+            f"crop={width}:{height},boxblur=20:10[bgf];"
+            f"[fg]scale={width}:{height}:force_original_aspect_ratio=decrease[fgf];"
+            f"[bgf][fgf]overlay=(W-w)/2:(H-h)/2[v0]"
+        )
+        if caption_path:
+            filter_complex += f";[v0]ass={caption_path}:fontsdir={_filter_path(fonts_directory())}[v]"
+            video_map = "[v]"
+        else:
+            video_map = "[v0]"
+    else:
+        if caption_file:
+            vf.append(f"ass={_filter_path(caption_file)}:fontsdir={_filter_path(fonts_directory())}")
     args = [
         FFMPEG,
         "-y",
@@ -496,13 +639,13 @@ def render_clip(
         "-t",
         f"{duration:.3f}",
         "-map",
-        "0:v:0",
-        "-map",
         "0:a?",
-        "-vf",
-        ",".join(vf),
+        ("-filter_complex" if filter_complex else "-vf"),
+        (filter_complex if filter_complex else ",".join(vf)),
         "-r",
         "30",
+        "-map",
+        video_map,
         "-c:v",
         "libx264",
         "-preset",
@@ -629,6 +772,13 @@ def _caption_ass(out: str | Path, clip: dict, srt: str | None = None) -> Path | 
         "minimal": (46, 0, 1),
         "clean": (52, 0, 2),
     }.get(style, (52, 0, 2))
+    fontsize = max(32, min(90, float(clip.get("caption_size", fontsize))))
+    family = font_name(str(clip.get("caption_font", "outfit")), text or str(srt or ""))
+    canvas_width = 720
+    _, canvas_height = aspect_dimensions(
+        {"resolution": canvas_width, "aspect_ratio": clip.get("aspect_ratio", "9:16")}
+    )
+    font_width_scale = round(canvas_width / 720 * 100)
     alignment = 5 if clip.get("caption_position") == "center" else 2
     margin_v = 72
 
@@ -663,26 +813,30 @@ def _caption_ass(out: str | Path, clip: dict, srt: str | None = None) -> Path | 
             r"\d+\s*\n(\d{2}:\d{2}:\d{2}[,.]\d{3})\s*-->\s*(\d{2}:\d{2}:\d{2}[,.]\d{3})\s*\n([\s\S]*?)(?=\n\s*\n|\Z)",
             srt_text,
         )
-        events = [
-            (ass_time(a), ass_time(b), ass_text(t.strip()))
-            for a, b, t in blocks
-            if t.strip()
-        ]
+        def seconds(value):
+            h, m, sec = value.replace(",", ".").split(":")
+            return int(h) * 3600 + int(m) * 60 + float(sec)
+
+        def timestamp(value):
+            return f"{int(value // 3600)}:{int(value // 60) % 60:02d}:{value % 60:05.2f}"
+
+        events = [(timestamp(a), timestamp(b), ass_text(t))
+                  for start, end, line in blocks
+                  for a, b, t in caption_cues(seconds(start), seconds(end), line)]
     if not events:
         return None
-    # Normalized editor coordinates map to ASS's fixed 720x1280 canvas,
-    # remaining identical at every export resolution. Legacy presets retain
-    # their old placement until the clip is edited.
+    # Normalized editor coordinates map to the selected aspect canvas while
+    # keeping the established 720px caption width and font scale.
     position = ""
     if "caption_x" in clip or "caption_y" in clip:
-        x = round(max(0.05, min(0.95, float(clip.get("caption_x", 0.5)))) * 720)
-        y = round(max(0.05, min(0.95, float(clip.get("caption_y", 0.86)))) * 1280)
+        x = round(max(0.05, min(0.95, float(clip.get("caption_x", 0.5)))) * canvas_width)
+        y = round(max(0.05, min(0.95, float(clip.get("caption_y", 0.86)))) * canvas_height)
         position = f"{{\\an5\\pos({x},{y})}}"
     # ASS is self-contained and avoids shell quoting or shell command interpolation.
     path.write_text(
-        "[Script Info]\nScriptType: v4.00+\nPlayResX: 720\nPlayResY: 1280\n\n"
+        f"[Script Info]\nScriptType: v4.00+\nPlayResX: {canvas_width}\nPlayResY: {canvas_height}\n\n"
         "[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n"
-        f"Style: Clip,DejaVu Sans,{fontsize},&H00{bgr},&H00{bgr},&H000000,&H99000000,{bold},0,0,0,100,100,0,0,1,{outline},1,{alignment},42,42,{margin_v},1\n\n"
+        f"Style: Clip,{family},{fontsize},&H00{bgr},&H00{bgr},&H000000,&H99000000,{bold},0,0,0,{font_width_scale},100,0,0,1,{outline},1,{alignment},42,42,{margin_v},1\n\n"
         "[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
         + "".join(
             f"Dialogue: 0,{a},{b},Clip,,0,0,0,,{position}{t}\n" for a, b, t in events
@@ -707,7 +861,7 @@ def _burn_caption(out: str | Path, clip: dict, srt: str | None = None) -> None:
                     "-i",
                     str(src),
                     "-vf",
-                    f"ass={_filter_path(caption_file)}",
+                    f"ass={_filter_path(caption_file)}:fontsdir={_filter_path(fonts_directory())}",
                     "-map",
                     "0:v:0",
                     "-map",
@@ -741,9 +895,17 @@ def _render_follow_cv2(
     clip: dict,
     out: str | Path,
     width: int,
+    height: int,
     progress: Progress | None = None,
+    *,
+    auto_tracking: bool = True,
 ) -> None:
-    """Track a face, then salient motion, while writing CFR frames and remuxing original audio."""
+    """Track a face or salient subject and render a stable, zoomable camera path.
+
+    Detection is intentionally conservative.  The camera controller in ``camera.py``
+    owns continuity, dead-zone, acceleration, and scene-cut behavior; this function
+    only translates detector boxes and frames into pixels.
+    """
     import cv2  # type: ignore
 
     start, end = max(0.0, float(clip["start"])), float(clip["end"])
@@ -753,8 +915,13 @@ def _render_follow_cv2(
     sw, sh = int(sw), int(sh)
     if sw < 2 or sh < 2:
         raise RuntimeError("source has no video frames")
-    crop_w = min(sw, max(2, int(sh * 9 / 16)))
-    crop_h = min(sh, max(2, int(sw * 16 / 9)))
+    target_aspect = width / max(1, height)
+    if sw / sh >= target_aspect:
+        crop_w = min(sw, max(2, int(sh * target_aspect)))
+        crop_h = sh
+    else:
+        crop_w = sw
+        crop_h = min(sh, max(2, int(sw / target_aspect)))
     # Landscape material uses a 9:16 crop; for a narrow source use the largest safe crop.
     crop_w, crop_h = min(crop_w, sw), min(crop_h, sh)
     process = subprocess.Popen(
@@ -782,7 +949,7 @@ def _render_follow_cv2(
     )
     temp = Path(out).with_suffix(".tracking.mp4")
     writer = cv2.VideoWriter(
-        str(temp), cv2.VideoWriter_fourcc(*"mp4v"), 30.0, (width, int(width * 16 / 9))
+        str(temp), cv2.VideoWriter_fourcc(*"mp4v"), 30.0, (width, height)
     )
     if not writer.isOpened():
         if process.poll() is None:
@@ -796,15 +963,57 @@ def _render_follow_cv2(
         cv2.CascadeClassifier(
             os.path.join(haar_root, "haarcascade_frontalface_default.xml")
         )
-        if haar_root and hasattr(cv2, "CascadeClassifier")
+        if auto_tracking and haar_root and hasattr(cv2, "CascadeClassifier")
         else None
     )
-    focus = max(0.0, min(1.0, float(clip.get("focus_x", 0.5))))
-    smooth = max(0.0, min(0.8, float(clip.get("smoothing", 0.15))))
+    settings = camera_settings(clip)
+    camera = CameraController(
+        motion=str(settings["motion"]),
+        zoom=float(settings["zoom"]),
+        dead_zone=float(settings["dead_zone"]),
+        initial=CameraPoint(
+            max(0.0, min(1.0, float(clip.get("focus_x", 0.5)))),
+            max(0.0, min(1.0, float(clip.get("focus_y", 0.5)))),
+            float(settings["zoom"]),
+        ),
+    )
+    keyframes = settings["keyframes"]
+    auto_zoom = bool(settings.get("auto_zoom", False))
+    auto_zoom_target = float(settings["zoom"])
+    strategy = str(settings.get("strategy", "adaptive"))
+    # Explicit keyframes are an authored camera path.  Adaptive safety is still
+    # available for ordinary follow clips, but never silently overrides a path the
+    # user authored frame by frame.
+    adaptive_safety = strategy == "adaptive" and not keyframes and auto_tracking
+    # Once adaptive analysis sees distributed content, keep the full-frame mode for
+    # this clip. Switching back to a crop on a later detector pass could lose a
+    # diagram label during a transient low-edge frame.
+    safe_mode: str | None = None
+    safe_zoom_cap = float(settings["zoom"])
+    last_face_boxes: list[tuple[int, int, int, int]] = []
+    remote_plans = ()
+    if str(settings.get("vision_provider", "local")) == "gemini" and auto_tracking:
+        try:
+            remote_plans = _gemini_clip_plans(source, start, end, progress)
+            if any(plan.protect_full_frame for plan in remote_plans):
+                selected = next(
+                    (plan.mode for plan in remote_plans if plan.protect_full_frame and plan.mode in {"fit", "blur"}),
+                    str(settings.get("safe_framing", "fit")),
+                )
+                safe_mode = selected
+        except Exception as exc:
+            # A failed remote analysis must never make an export fail or turn into
+            # an unsafe crop. Local OpenCV safety continues and the progress reason
+            # is visible to the job UI.
+            remote_plans = ()
+            if progress:
+                progress("vision fallback", 45)
     frames = max(1, int((end - start) * 30))
     i = 0
     frame_bytes = sw * sh * 3
-    last_candidate = None
+    last_target: TrackedTarget | None = None
+    detector_misses = 0
+    previous_gray = None
     frame_failed = False
     try:
         try:
@@ -834,48 +1043,218 @@ def _render_follow_cv2(
                     interpolation=cv2.INTER_AREA,
                 )
                 gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
-                candidate = last_candidate
-                if i % 3 == 0:
+                remote_plan = _nearest_remote_plan(remote_plans, i, frames)
+                remote_boxes = [
+                    (
+                        int(round(x * sample_w)),
+                        int(round(y * small.shape[0])),
+                        int(round(w * sample_w)),
+                        int(round(h * small.shape[0])),
+                    )
+                    for x, y, w, h in (remote_plan.faces if remote_plan else ())
+                ]
+                if remote_plan and remote_plan.protect_full_frame and remote_plan.mode in {"fit", "blur"}:
+                    safe_mode = remote_plan.mode
+                remote_candidate = choose_target(
+                    remote_boxes,
+                    small.shape[1],
+                    small.shape[0],
+                    last_target,
+                    str(clip.get("subject", "auto")),
+                ) if remote_boxes else None
+                candidate = remote_candidate or last_target
+                scene_cut = False
+                prior_gray = previous_gray if auto_tracking else None
+                if auto_tracking and prior_gray is not None:
+                    scene_delta = float(
+                        cv2.absdiff(prior_gray, gray).mean()
+                    )
+                    # A hard cut should immediately release the previous identity.
+                    # The threshold is deliberately high enough to ignore ordinary
+                    # movement and low-light noise.
+                    scene_cut = i > 2 and scene_delta >= 48.0
+                    if scene_cut:
+                        # Do not carry the previous subject through a cut on
+                        # frames where detection is throttled (every third
+                        # frame).  Otherwise the camera reset immediately
+                        # snaps back toward the old scene's subject.
+                        last_target = None
+                        candidate = None
+                        auto_zoom_target = float(settings["zoom"])
+                if auto_tracking:
+                    previous_gray = gray
+                if auto_tracking and i % 3 == 0:
                     faces = (
                         cascade.detectMultiScale(gray, 1.1, 4)
                         if cascade is not None and not cascade.empty()
                         else []
                     )
-                    candidate = None
-                    if len(faces):
-                        candidate = _select_face_x(
-                            faces,
+                    # Convert detector sample boxes to source pixels before using
+                    # them for viewport safety.  A single face may be followed, but
+                    # the crop must leave enough room for every detected face.
+                    local_face_boxes = [
+                        (
+                            int(round(x * sw / max(1, sample_w))),
+                            int(round(y * sh / max(1, small.shape[0]))),
+                            int(round(w * sw / max(1, sample_w))),
+                            int(round(h * sh / max(1, small.shape[0]))),
+                        )
+                        for x, y, w, h in faces
+                    ]
+                    last_face_boxes = local_face_boxes or [
+                        (
+                            int(round(x * sw / max(1, sample_w))),
+                            int(round(y * sh / max(1, small.shape[0]))),
+                            int(round(w * sw / max(1, sample_w))),
+                            int(round(h * sh / max(1, small.shape[0]))),
+                        )
+                        for x, y, w, h in remote_boxes
+                    ]
+                    if last_face_boxes:
+                        safe_zoom_cap = safe_zoom_for_boxes(
+                            last_face_boxes,
+                            sw,
+                            sh,
+                            crop_w,
+                            crop_h,
+                            float(settings["zoom"]),
+                        )
+                    else:
+                        safe_zoom_cap = float(settings["zoom"])
+                    if adaptive_safety and len(faces) == 0 and not remote_boxes and safe_mode is None:
+                        signals = analyze_frame(small)
+                        if signals.distributed_content:
+                            safe_mode = str(settings.get("safe_framing", "fit"))
+                    face_target = None
+                    candidate = choose_target(
+                        faces,
+                        small.shape[1],
+                        small.shape[0],
+                        last_target,
+                        str(clip.get("subject", "auto")),
+                    ) if len(faces) else remote_candidate
+                    face_target = candidate
+                    # Motion is only considered when no face is available.  It uses
+                    # frame difference and connected components, avoiding the old
+                    # whole-frame threshold that often chased a bright wall.
+                    if candidate is None and prior_gray is not None:
+                        diff = cv2.absdiff(prior_gray, gray)
+                        _, motion_mask = cv2.threshold(diff, 22, 255, cv2.THRESH_BINARY)
+                        motion_mask = cv2.morphologyEx(
+                            motion_mask, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+                        )
+                        contours, _ = cv2.findContours(
+                            motion_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+                        )
+                        boxes = []
+                        image_area = float(max(1, small.shape[0] * small.shape[1]))
+                        for contour in contours:
+                            x, y, w, h = cv2.boundingRect(contour)
+                            area = (w * h) / image_area
+                            if 0.003 <= area <= 0.65:
+                                boxes.append((x, y, w, h))
+                        candidate = choose_target(
+                            boxes,
                             small.shape[1],
-                            last_candidate,
+                            small.shape[0],
+                            last_target,
                             str(clip.get("subject", "auto")),
                         )
-                    if candidate is None:
-                        blur = cv2.GaussianBlur(gray, (11, 11), 0)
-                        _, th = cv2.threshold(
-                            blur, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU
-                        )
-                        moments = cv2.moments(th)
-                        if moments["m00"]:
-                            candidate = (moments["m10"] / moments["m00"]) / small.shape[
-                                1
-                            ]
-                    last_candidate = candidate
-                if candidate is not None:
-                    focus = (
-                        float(candidate)
-                        if smooth == 0
-                        else focus * (1 - smooth) + float(candidate) * smooth
+                    if auto_zoom:
+                        if face_target is not None and face_target.box:
+                            face_height = max(1.0, float(face_target.box[3]))
+                            sample_height = max(1.0, float(small.shape[0]))
+                            # Size the detected face to roughly 30% of the
+                            # output crop.  Detector boxes are sample-sized,
+                            # so use their normalized height and the crop's
+                            # source-height fraction before applying the
+                            # user's zoom ceiling.
+                            auto_zoom_target = _face_zoom_target(
+                                face_height,
+                                sample_height,
+                                crop_h,
+                                sh,
+                                float(settings["zoom"]),
+                            )
+                        else:
+                            # Motion fallback and detector misses have no
+                            # reliable subject size; never infer a punch-in
+                            # from arbitrary changed pixels.
+                            auto_zoom_target = 1.0
+                    if candidate is not None:
+                        last_target = candidate
+                        detector_misses = 0
+                    else:
+                        detector_misses += 1
+                        if detector_misses > 18:
+                            last_target = None
+                    # A cut starts a fresh association even when no detector target
+                    # exists in the first frame of the new scene.
+                    if scene_cut:
+                        last_target = candidate
+                point = interpolate_keyframes(start + i / 30.0, keyframes)
+                if point is None:
+                    point = camera.update(
+                        last_target,
+                        1.0 / 30.0,
+                        scene_cut=scene_cut,
+                        target_zoom=(
+                            min(
+                                auto_zoom_target if auto_zoom else float(settings["zoom"]),
+                                safe_zoom_cap,
+                            )
+                            if last_face_boxes and strategy != "manual"
+                            else (auto_zoom_target if auto_zoom else float(settings["zoom"]))
+                        ),
                     )
-                cx = int(max(crop_w / 2, min(sw - crop_w / 2, focus * sw)))
-                x0, y0 = int(cx - crop_w / 2), int(max(0, (sh - crop_h) / 2))
-                cropped = frame[y0 : y0 + crop_h, x0 : x0 + crop_w]
-                writer.write(
-                    cv2.resize(
-                        cropped,
-                        (width, int(width * 16 / 9)),
-                        interpolation=cv2.INTER_AREA,
+                else:
+                    # Manual keyframes are authored camera positions.  Interpolation
+                    # is deterministic and must not be changed by detector smoothing.
+                    camera.point = point.bounded()
+                    camera._velocity[:] = [0.0, 0.0, 0.0]
+                zoom = max(1.0, min(1.5, float(point.zoom)))
+                if last_face_boxes and strategy != "manual":
+                    # Apply the cap at the pixel boundary too; controller velocity
+                    # smoothing must never produce a transient face cut.
+                    zoom = min(zoom, safe_zoom_cap)
+                current_crop_w = max(2, min(sw, int(round(crop_w / zoom))))
+                current_crop_h = max(2, min(sh, int(round(crop_h / zoom))))
+                cx = int(max(current_crop_w / 2, min(sw - current_crop_w / 2, point.x * sw)))
+                cy = int(max(current_crop_h / 2, min(sh - current_crop_h / 2, point.y * sh)))
+                x0 = int(cx - current_crop_w / 2)
+                y0 = int(cy - current_crop_h / 2)
+                # A zoom cap can correctly bottom out at 1x while the union of
+                # several subjects is still wider than the portrait crop. The final
+                # pixel boundary is authoritative: adaptive framing must preserve
+                # every reliable face, even if that means fitting the whole source.
+                faces_need_full_frame = (
+                    strategy == "adaptive"
+                    and bool(last_face_boxes)
+                    and not boxes_fit_viewport(
+                        last_face_boxes,
+                        x0,
+                        y0,
+                        current_crop_w,
+                        current_crop_h,
+                        margin=0.0,
                     )
                 )
+                frame_mode = safe_mode
+                if faces_need_full_frame:
+                    frame_mode = str(settings.get("safe_framing", "fit"))
+                if frame_mode:
+                    # Screen content has no compact subject to follow.  Preserve all
+                    # source pixels even when the requested output is portrait.
+                    writer.write(full_frame_view(frame, width, height, frame_mode))
+                else:
+                    cropped = frame[y0 : y0 + current_crop_h, x0 : x0 + current_crop_w]
+                    writer.write(
+                        cv2.resize(
+                            cropped,
+                            (width, height),
+                            interpolation=cv2.INTER_AREA,
+                        )
+                    )
                 i += 1
                 if progress and i % 30 == 0:
                     progress("tracking", 45 + min(35, int(i / frames * 35)))

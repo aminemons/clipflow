@@ -10,7 +10,7 @@
 
 .hosted-gate-loading {
   color: #b9bfbb;
-  letter-spacing: .02em;
+  letter-spacing: 0.02em;
   gap: 14px;
 }
 
@@ -27,17 +27,17 @@
 .hosted-login-card {
   width: min(100%, 420px);
   padding: 32px;
-  border: 1px solid rgba(214, 251, 120, .18);
+  border: 1px solid rgba(214, 251, 120, 0.18);
   border-radius: 20px;
   background: #1a1e1b;
-  box-shadow: 0 24px 80px rgba(0, 0, 0, .28);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.28);
 }
 
 .hosted-eyebrow {
   color: #d6fb78;
   font-size: 11px;
   font-weight: 700;
-  letter-spacing: .13em;
+  letter-spacing: 0.13em;
   text-transform: uppercase;
 }
 
@@ -94,7 +94,7 @@
 
 .hosted-login-card button:disabled {
   cursor: wait;
-  opacity: .6;
+  opacity: 0.6;
 }
 
 .hosted-form-error {
@@ -112,10 +112,10 @@
   align-items: center;
   gap: 10px;
   padding: 6px 7px 6px 12px;
-  border: 1px solid rgba(214, 251, 120, .2);
+  border: 1px solid rgba(214, 251, 120, 0.2);
   border-radius: 999px;
   color: #c5ccc6;
-  background: rgba(17, 19, 19, .9);
+  background: rgba(17, 19, 19, 0.9);
   font-size: 12px;
 }
 

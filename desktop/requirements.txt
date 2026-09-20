@@ -1,0 +1,7 @@
+# Optional desktop-only runtime. The backend requirements remain unchanged.
+# pywebview's Windows backend uses Python.NET. 3.0.x keeps the CLR loader
+# compatible with PyInstaller's onedir layout; 3.1.x can fail to resolve
+# Python.Runtime.Loader.Initialize after freezing.
+pywebview>=5.3,<6
+pythonnet>=3.0,<3.1
+pyinstaller>=6.10,<7

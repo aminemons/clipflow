@@ -1,0 +1,218 @@
+.publish-project-picker {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 26px 0;
+  font-size: 14px;
+}
+.publish-project-picker select {
+  max-width: 620px;
+  width: 100%;
+  padding: 11px;
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+.publish-section {
+  padding: 26px 0;
+  border-top: 1px solid var(--line);
+}
+.publish-section h2 {
+  font-size: 20px;
+  margin: 0 0 10px;
+}
+.publish-section p {
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.6;
+  max-width: 78ch;
+}
+.publish-section > header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 22px;
+  flex-wrap: wrap;
+  margin-bottom: 22px;
+}
+.publish-inline-actions {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.approval-list {
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+  margin-bottom: 12px;
+}
+.approval-list article {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--line);
+}
+.approval-list article:last-child {
+  border-bottom: 0;
+}
+.approval-list article.is-approved {
+  border-left: 3px solid #348467;
+}
+.approval-clip-name {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-width: 0;
+  flex: 1;
+}
+.approval-clip-name strong {
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+.approval-clip-name span {
+  font-size: 13px;
+  color: var(--muted);
+}
+.publish-destinations {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+  margin: 20px 0;
+}
+.publish-destinations label {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  padding: 18px;
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+}
+.publish-destinations strong {
+  font-size: 14px;
+}
+.publish-destinations small {
+  display: block;
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.6;
+  margin-top: 6px;
+}
+.publish-section > .settings-field {
+  max-width: 680px;
+  margin: 20px 0;
+}
+.publish-section textarea {
+  min-height: 85px;
+  resize: vertical;
+}
+.publish-history article {
+  display: grid;
+  grid-template-columns: 160px minmax(0, 1fr) 140px;
+  gap: 15px;
+  padding: 16px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 14px;
+}
+.publish-history article p {
+  grid-column: 1/-1;
+  margin: 0;
+}
+.publish-history a {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+}
+.publish-review-dialog {
+  width: min(840px, calc(100vw - 28px));
+  max-height: 90dvh;
+  overflow: auto;
+  background: white;
+  padding: 28px;
+  border-radius: 12px;
+}
+.publish-review-dialog > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+.publish-review-dialog h2 {
+  font-size: 23px;
+}
+.publish-review-dialog header button {
+  background: none;
+  flex-shrink: 0;
+}
+.publish-review-dialog video {
+  display: block;
+  max-height: 310px;
+  max-width: 100%;
+  margin: 16px auto;
+  background: #111;
+}
+.publish-plan-targets {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 20px;
+  margin: 24px 0;
+}
+.publish-plan-targets article {
+  padding: 16px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  min-width: 0;
+}
+.publish-plan-targets p {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.publish-consent {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+  line-height: 1.6;
+  margin: 24px 0;
+}
+.publish-review-dialog > .settings-field {
+  margin-bottom: 18px;
+}
+.model-provider-row {
+  padding: 16px 0;
+  border-top: 1px solid var(--line);
+}
+@media (max-width: 800px) {
+  .publish-destinations {
+    grid-template-columns: 1fr;
+  }
+  .approval-list article {
+    flex-wrap: wrap;
+    padding: 15px;
+  }
+  .approval-list .publish-inline-actions {
+    width: 100%;
+    padding-left: 30px;
+  }
+  .publish-history article {
+    grid-template-columns: 1fr 1fr;
+  }
+  .publish-history article span {
+    grid-column: 1/-1;
+    grid-row: 2;
+  }
+  .publish-review-dialog {
+    padding: 18px;
+  }
+  .publish-project-picker {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .publish-section > header {
+    align-items: flex-start;
+  }
+}

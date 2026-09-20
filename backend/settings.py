@@ -15,8 +15,12 @@ from fastapi import HTTPException, Request
 from .config import ROOT, value
 
 ENV_PATH = Path(value("CLIPFLOW_SETTINGS_FILE", str(ROOT / ".env")))
-KEYS = {"GROQ_API_KEY", "HF_API_KEY", "HF_API_SECRET"}
+KEYS = {"GROQ_API_KEY", "HF_API_KEY", "HF_API_SECRET", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY"}
 FIELDS = {
+    "openai_text_model": "OPENAI_TEXT_MODEL",
+    "anthropic_text_model": "ANTHROPIC_TEXT_MODEL",
+    "gemini_text_model": "GEMINI_TEXT_MODEL",
+    "ollama_text_model": "OLLAMA_TEXT_MODEL",
     "transcription_provider": "CLIPFLOW_TRANSCRIPTION_PROVIDER",
     "whisper_model": "CLIPFLOW_WHISPER_MODEL",
     "transcription_language": "CLIPFLOW_LANGUAGE",
@@ -32,7 +36,9 @@ _lock = threading.Lock()
 
 
 def public_settings() -> dict:
+    from .language_models import PROVIDERS
     return {
+        **{name + "_text_model": value(field, default) for name, (_, field, default) in PROVIDERS.items()},
         "transcription_provider": value("CLIPFLOW_TRANSCRIPTION_PROVIDER", "local"),
         "whisper_model": value("CLIPFLOW_WHISPER_MODEL", ""),
         "transcription_language": value("CLIPFLOW_LANGUAGE", "auto") or "auto",
@@ -59,8 +65,8 @@ def save_settings(body: dict) -> dict:
         if field not in body:
             continue
         setting = body[field]
-        if field.endswith("_provider") and setting not in ("local", "groq"):
-            raise ValueError("Choose local or Groq as the provider.")
+        if field.endswith("_provider") and setting not in (("local", "groq", "openai", "anthropic", "gemini", "ollama") if field == "highlight_provider" else ("local", "groq")):
+            raise ValueError("Choose a provider supported for this task.")
         if field == "whisper_model" and setting not in (
             "",
             "tiny",
@@ -97,9 +103,9 @@ def save_settings(body: dict) -> dict:
             "whisper-large-v3-turbo",
         ):
             raise ValueError("Choose a supported Groq Whisper model.")
-        if field == "groq_highlight_model" and (
+        if (field == "groq_highlight_model" or field.endswith("_text_model")) and (
             not isinstance(setting, str)
-            or not re.fullmatch(r"[A-Za-z0-9._/-]{1,150}", setting)
+            or not re.fullmatch(r"[A-Za-z0-9._/:-]{1,150}", setting)
         ):
             raise ValueError("Enter a valid Groq model identifier.")
         if field == "higgsfield_enabled":

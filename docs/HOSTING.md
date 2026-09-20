@@ -36,6 +36,10 @@ The external worker origin must be HTTPS and must not be localhost or a loopback
 
 The worker needs persistent storage for `CLIPFLOW_DATA`, enough temporary disk for uploads/renders, FFmpeg/FFprobe, and a long request/job lifetime. Run one worker for the current in-process executor. Do not deploy the processing worker as an ephemeral serverless function: jobs, media, and the in-memory session store must share the same persistent instance.
 
+The container listens on `PORT` when a host supplies it and uses `8767` otherwise. Set `CLIPFLOW_MODEL_CACHE=/app/data/models` (the Docker image default) so local Whisper downloads stay on the persistent data volume. The Docker build context excludes generated desktop artifacts, local data, tests, docs, dependency caches, archives, `.env` files, and the private Neue font binaries; provider secrets and user media must be supplied through the host environment or volume only.
+
+For Azure container hosting, configure ingress to the container port (`8767` by default, or the value supplied through `PORT`) and mount persistent storage at `CLIPFLOW_DATA`. The default container filesystem is not a safe home for projects, source media, exports, settings, or downloaded speech models.
+
 ## Verification
 
 `backend/tests/test_hosting.py` uses a fake Supabase client and covers fail-closed configuration, local no-account mode, owner login, Secure/HttpOnly opaque cookies, non-owner rejection, exact-origin mutation checks, media/API protection, logout revocation, rate limiting, and session expiry. It does not contact a live Supabase account; perform one manual smoke test after the worker and Supabase owner are configured.

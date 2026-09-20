@@ -53,6 +53,17 @@ class Store:
             raise ValueError("This project requires a newer version of Clipflow.")
         result["schema_version"] = 2
         result.setdefault("edit_revision", 0)
+        created_at = result.get("created_at") or utc_now()
+        result.setdefault("created_at", created_at)
+        result.setdefault("updated_at", created_at)
+        if not isinstance(result.get("favorite"), bool):
+            result["favorite"] = False
+        if not isinstance(result.get("tags"), list):
+            result["tags"] = []
+        else:
+            result["tags"] = [tag for tag in result["tags"] if isinstance(tag, str)]
+        if not isinstance(result.get("archived"), bool):
+            result["archived"] = False
         for clip in result.get("clips", []):
             if isinstance(clip, dict):
                 clip.setdefault("reviewed", False)
@@ -106,7 +117,11 @@ class Store:
             value = self.get(p.stem)
             if value is not None:
                 out.append(value)
-        return sorted(out, key=lambda x: x.get("created_at", ""), reverse=True)
+        return sorted(
+            out,
+            key=lambda x: x.get("updated_at") or x.get("created_at", ""),
+            reverse=True,
+        )
 
     @property
     def jobs_path(self) -> Path:

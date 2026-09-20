@@ -188,14 +188,16 @@ export default function TranscriptionControls({
       <button
         className="speech-start"
         disabled={!projectId || busy}
-        onClick={() => available ? void start() : onOpenSettings()}
+        onClick={() => (available ? void start() : onOpenSettings())}
       >
         <Mic2 size={14} />
         {busy
           ? "Processing…"
-          : !available ? "Set up transcription" : hasTranscript
-            ? "Update captions"
-            : "Generate captions"}
+          : !available
+            ? "Set up transcription"
+            : hasTranscript
+              ? "Update captions"
+              : "Generate captions"}
       </button>
       {error && (
         <p className="speech-error" role="alert">

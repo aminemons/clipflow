@@ -82,6 +82,12 @@ def create_demo(client: TestClient):
     job = wait_job(
         client, client.post("/api/projects/demo", json={"target_duration": 5})
     )
+    wait_job(
+        client,
+        client.post(
+            f"/api/projects/{job['project_id']}/analyze", json={"target_duration": 5}
+        ),
+    )
     project = client.get(f"/api/projects/{job['project_id']}").json()
     assert project["duration"] == pytest.approx(12, abs=0.2)
     return job["project_id"], project
@@ -112,6 +118,13 @@ def test_upload_multipart_respects_actual_five_second_duration(client, tmp_path)
         )
     project = c.get(f"/api/projects/{result['project_id']}").json()
     assert project["duration"] == pytest.approx(5, abs=0.2)
+    wait_job(
+        c,
+        c.post(
+            f"/api/projects/{result['project_id']}/analyze", json={"target_duration": 5}
+        ),
+    )
+    project = c.get(f"/api/projects/{result['project_id']}").json()
     assert project["clips"][-1]["end"] <= project["duration"] + 0.02
 
 

@@ -8,8 +8,10 @@ import math
 import os
 import re
 import shutil
+import stat
 import threading
 import tempfile
+import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -18,7 +20,7 @@ from typing import Any, Literal
 from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, PlainTextResponse, StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StrictBool, StrictInt
 
 from .config import public_capabilities, value
 from .hosting import install_hosted_security
@@ -33,6 +35,12 @@ from .media import (
     track_focus,
 )
 from .store import Store, utc_now
+from .source_probe import (
+    format_selector,
+    probe_youtube,
+    validate_youtube_url,
+)
+from .clip_generation import GenerateInput, generate_clips
 from .export_artifacts import (
     finalize_exports,
     register_routes as register_export_routes,
@@ -51,6 +59,9 @@ projects_lock = threading.RLock()
 cancel_events: dict[str, threading.Event] = {}
 MAX_UPLOAD = 500 * 1024 * 1024
 MIN_FREE_BYTES = 32 * 1024 * 1024
+_storage_cache_lock = threading.Lock()
+_storage_cache: tuple[str, float, dict[str, Any]] | None = None
+STORAGE_CACHE_TTL = 5.0
 
 
 def ensure_workspace_space(required: int = 0) -> None:
@@ -62,6 +73,134 @@ def ensure_workspace_space(required: int = 0) -> None:
         raise RuntimeError(
             "Not enough storage for this operation. Free disk space or change CLIPFLOW_DATA."
         )
+
+
+def _project_has_active_job(project_id: str) -> bool:
+    """Read the in-process job registry while holding its lock."""
+    with jobs_lock:
+        return any(
+            item.get("project_id") == project_id
+            and item.get("status") in {"queued", "running"}
+            for item in jobs.values()
+        )
+
+
+def _safe_file_bytes(path: Path, root: Path) -> int:
+    """Return a regular file size only when it stays inside the data root."""
+    try:
+        if path.is_symlink() or not path.is_file():
+            return 0
+        resolved = path.resolve()
+        resolved.relative_to(root)
+        return resolved.stat().st_size
+    except (OSError, ValueError):
+        return 0
+
+
+def _walk_storage(root: Path, limit: int = 20000) -> list[tuple[Path, int]]:
+    """Bound the summary walk so a large local workspace cannot stall the API."""
+    rows: list[tuple[Path, int]] = []
+    pending = [root]
+    while pending and len(rows) < limit:
+        current = pending.pop()
+        try:
+            entries = list(current.iterdir())
+        except OSError:
+            continue
+        for entry in entries:
+            if entry.is_symlink():
+                continue
+            try:
+                if entry.is_dir():
+                    pending.append(entry)
+                elif entry.is_file():
+                    rows.append((entry, entry.stat().st_size))
+            except OSError:
+                continue
+            if len(rows) >= limit:
+                break
+    return rows
+
+
+def _model_roots() -> list[Path]:
+    configured = os.getenv("CLIPFLOW_MODEL_CACHE") or os.getenv("HF_HOME")
+    candidates = [
+        Path(configured) if configured else Path(store.root).parent / "models",
+    ]
+    roots: list[Path] = []
+    for candidate in candidates:
+        try:
+            resolved = candidate.resolve()
+        except OSError:
+            continue
+        if resolved.exists() and resolved.is_dir() and resolved not in roots:
+            roots.append(resolved)
+    return roots
+
+
+def _storage_summary() -> dict[str, Any]:
+    global _storage_cache
+    files_root = Path(store.files).resolve()
+    cache_key = str(files_root)
+    now = time.monotonic()
+    with _storage_cache_lock:
+        if (
+            _storage_cache
+            and _storage_cache[0] == cache_key
+            and now - _storage_cache[1] < STORAGE_CACHE_TTL
+        ):
+            return copy.deepcopy(_storage_cache[2])
+
+    rows = _walk_storage(files_root)
+    media_exts = {".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v"}
+    source_bytes = 0
+    export_bytes = 0
+    media_bytes = 0
+    for path, size in rows:
+        try:
+            relative = path.relative_to(files_root)
+        except ValueError:
+            continue
+        if len(relative.parts) == 1 and path.suffix.lower() in media_exts:
+            source_bytes += size
+        elif "exports" in relative.parts or (
+            len(relative.parts) == 2
+            and path.suffix.lower() in {".mp4", ".zip"}
+            and not path.name.startswith("preview-")
+        ):
+            export_bytes += size
+        else:
+            media_bytes += size
+
+    model_bytes = 0
+    for model_root in _model_roots():
+        try:
+            model_root.relative_to(files_root)
+            continue
+        except ValueError:
+            pass
+        model_bytes += sum(size for _, size in _walk_storage(model_root))
+    used = {
+        "media_bytes": media_bytes,
+        "source_bytes": source_bytes,
+        "export_bytes": export_bytes,
+        "model_bytes": model_bytes,
+        "total_bytes": media_bytes + source_bytes + export_bytes + model_bytes,
+    }
+    try:
+        free_bytes = shutil.disk_usage(Path(store.root)).free
+    except OSError:
+        free_bytes = 0
+    result = {"used": used, "free_bytes": free_bytes, "cached_at": utc_now()}
+    with _storage_cache_lock:
+        _storage_cache = (cache_key, now, copy.deepcopy(result))
+    return result
+
+
+def _invalidate_storage_summary() -> None:
+    global _storage_cache
+    with _storage_cache_lock:
+        _storage_cache = None
 
 # Job summaries survive process restarts. Work that was interrupted cannot be
 # safely resumed without a serialized task payload, so it is surfaced as an
@@ -122,7 +261,12 @@ class JobCancelled(RuntimeError):
 
 class YouTubeInput(BaseModel):
     url: str
+    quality: StrictInt = Field(default=720, ge=1, le=1080)
     target_duration: float = Field(default=30, ge=5, le=300)
+
+
+class YouTubeInspectInput(BaseModel):
+    url: str
 
 
 class AnalyzeInput(BaseModel):
@@ -132,7 +276,7 @@ class AnalyzeInput(BaseModel):
     tolerance: float = Field(default=0.3, ge=0.1, le=0.5)
     topic: str = Field(default="", max_length=500)
     use_transcript: bool = True
-    provider: Literal["local", "groq"] | None = None
+    provider: Literal["local", "groq", "openai", "anthropic", "gemini", "ollama"] | None = None
     # Optional hard ceiling for smart clips. Omitted preserves the historical
     # target +/- tolerance behavior.
     strict_max: float | None = Field(default=None, ge=1, le=300)
@@ -174,6 +318,15 @@ class TranscribeInput(BaseModel):
 class BulkClipsInput(BaseModel):
     action: Literal["delete", "restore"]
     clip_ids: list[str] = Field(default_factory=list, max_length=2000)
+
+
+class ProjectPatch(BaseModel):
+    """Validated metadata edits for project management views."""
+
+    title: str | None = Field(default=None, max_length=120)
+    favorite: StrictBool | None = None
+    tags: list[str] | None = Field(default=None, max_length=8)
+    archived: StrictBool | None = None
 
 
 def job_view(job: dict) -> dict:
@@ -348,11 +501,22 @@ def clip_defaults(start: float, end: float, index: int, focus=(0.5, 0.5)) -> dic
         "end": round(end, 3),
         "selected": True,
         "framing": "follow",
+        "camera_motion": "smooth",
+        "camera_zoom": 1.0,
+        "camera_auto_zoom": False,
+        "camera_strategy": "adaptive",
+        "vision_provider": "local",
+        "safe_framing": "fit",
+        "camera_dead_zone": 0.08,
+        "camera_keyframes": [],
+        "aspect_ratio": "9:16",
         "focus_x": round(focus[0], 3),
         "smoothing": 0.15,
         "caption_text": "",
         "caption_style": "clean",
-        "caption_color": "#d6fb78",
+        "caption_font": "outfit",
+        "caption_size": 52,
+        "caption_color": "#ffffff",
         "caption_position": "bottom",
         "caption_x": 0.5,
         "caption_y": 0.86,
@@ -410,26 +574,58 @@ def source_path(project_id: str) -> Path:
     ]
     if not hits:
         raise HTTPException(404, "source not found")
-    root = store.files.resolve()
-    try:
-        resolved = hits[0].resolve()
-        resolved.relative_to(root)
-    except ValueError:
+    # Do not use Path.resolve() here.  On Windows packaged/AppContainer
+    # processes can return a virtualized final path for an ordinary file,
+    # which makes a valid source appear to be outside the data directory.
+    # Files are created beneath store.files and symlinks are rejected before
+    # this lexical containment check.
+    candidate = hits[0]
+    if not _safe_workspace_candidate(candidate, store.files):
         raise HTTPException(404, "source not found")
-    return resolved
+    return Path(os.path.normcase(os.path.abspath(str(candidate))))
 
 
 def workspace_file(path: Path) -> Path:
     """Resolve a generated file without following a symlink outside DATA."""
-    root = store.files.resolve()
-    resolved = path.resolve()
-    try:
-        resolved.relative_to(root)
-    except ValueError:
+    if not _safe_workspace_candidate(path, store.files):
         raise HTTPException(404, "file not found")
+    resolved = Path(os.path.normcase(os.path.abspath(str(path))))
     if not resolved.is_file():
         raise HTTPException(404, "file not found")
     return resolved
+
+
+def _safe_workspace_candidate(path: Path, root: Path) -> bool:
+    """Check workspace containment without Windows final-path resolution.
+
+    ``Path.resolve`` can report a virtualized AppContainer path for an
+    ordinary file.  Lexical containment avoids that false negative, while
+    this walk still rejects symlink/junction/reparse-point escapes in the
+    candidate's path components.
+    """
+    root_abs = os.path.normcase(os.path.abspath(str(root)))
+    candidate_abs = os.path.normcase(os.path.abspath(str(path)))
+    try:
+        if os.path.commonpath((root_abs, candidate_abs)) != root_abs:
+            return False
+    except ValueError:
+        return False
+    current = Path(candidate_abs)
+    root_path = Path(root_abs)
+    while True:
+        if current != root_path:
+            try:
+                attributes = getattr(os.lstat(current), "st_file_attributes", 0)
+            except OSError:
+                return False
+            if current.is_symlink() or attributes & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400):
+                return False
+        if current == root_path:
+            return True
+        parent = current.parent
+        if parent == current:
+            return False
+        current = parent
 
 
 def safe_identifier(value: str) -> str:
@@ -478,9 +674,10 @@ def smart_highlights_job(
     )
     warning = None
     provider = options.get("provider") or value("CLIPFLOW_HIGHLIGHT_PROVIDER", "local")
-    if provider == "groq" and not value("GROQ_API_KEY"):
+    from .language_models import available
+    if not available(provider):
         raise RuntimeError(
-            "Add a Groq key in Settings, or choose free local highlights."
+            "Configure the selected provider in Settings, or choose free local highlights."
         )
     if not transcript and options.get("use_transcript", True):
         has_audio = any(
@@ -507,7 +704,7 @@ def smart_highlights_job(
                     "Speech analysis was unavailable; structural scene/silence "
                     "fallback used."
                 )
-    if provider == "groq" and not transcript:
+    if provider != "local" and not transcript:
         raise RuntimeError(
             "Hosted highlights need a transcript. Enable speech analysis or choose local highlights for silent footage."
         )
@@ -584,7 +781,23 @@ def smart_highlights_job(
 
 
 def upload_job(item: dict, project_id: str, target: float):
-    return analyze_job(item, project_id, target)
+    """Finalize a local import without creating any editable clips.
+
+    ``target`` stays in the job arguments for retry compatibility with older
+    persisted jobs; source import and clip analysis are deliberately separate
+    user actions.
+    """
+    if not store.get(project_id):
+        raise RuntimeError("project not found")
+    source_path(project_id)
+    update(item, "source ready", 95)
+    return {}
+
+
+def generate_clips_job(item: dict, project_id: str, payload: dict):
+    # Pass the runtime services so the generator shares job locks and storage.
+    import sys
+    return generate_clips(sys.modules[__name__], item, project_id, payload)
 
 
 def _cleanup_youtube_downloads(project_id: str) -> None:
@@ -598,9 +811,26 @@ def _cleanup_youtube_downloads(project_id: str) -> None:
             continue
 
 
-def youtube_job(item: dict, project_id: str, url: str, target: float):
+def youtube_job(
+    item: dict,
+    project_id: str,
+    url: str,
+    target: float,
+    quality: int = 720,
+):
+    """Download one selected YouTube source and leave clips empty.
+
+    ``target`` is retained for compatibility with old queued/retry payloads;
+    analysis only starts from the explicit /analyze endpoint.
+    """
     project = store.get(project_id)
-    out = source_path(project_id)
+    if not project:
+        raise RuntimeError("project not found")
+    # Keep direct/retry calls subject to the same bounded integer contract as
+    # the API model.  The UI may choose an actual source height such as 144p.
+    format_selector(quality)
+    normalized_url = validate_youtube_url(url)
+    out = store.files / f"{project_id}.mp4"
     update(item, "downloading", 8)
     try:
         import yt_dlp  # type: ignore
@@ -618,7 +848,7 @@ def youtube_job(item: dict, project_id: str, url: str, target: float):
             )
 
         opts = {
-            "format": "bestvideo[height<=1080][vcodec^=avc1]+bestaudio[ext=m4a]/best[height<=1080]/bestvideo[height<=1080]+bestaudio",
+            "format": format_selector(quality),
             "outtmpl": str(out.with_suffix(".download.%(ext)s")),
             "merge_output_format": "mp4",
             "noplaylist": True,
@@ -630,7 +860,7 @@ def youtube_job(item: dict, project_id: str, url: str, target: float):
             "js_runtimes": {"node": {}},
         }
         with yt_dlp.YoutubeDL(opts) as dl:
-            info = dl.extract_info(url, download=True)
+            info = dl.extract_info(normalized_url, download=True)
             project["title"] = str(info.get("title") or "YouTube import")[:200]
         candidates = [
             p
@@ -649,12 +879,15 @@ def youtube_job(item: dict, project_id: str, url: str, target: float):
     if d <= 0 or w <= 0:
         raise RuntimeError("downloaded YouTube media is unreadable")
     project.update(duration=round(d, 3), width=w, height=h, fps=round(fps, 3))
+    project["source_origin_url"] = normalized_url
+    project["source_quality"] = quality
     store.save(project)
-    update(item, "analyzing", 25)
-    return analyze_job(item, project_id, target)
+    update(item, "source ready", 95)
+    return {}
 
 
 def demo_job(item: dict, project_id: str, target: float):
+    """Generate a local source; analysis remains an explicit user action."""
     out = source_path(project_id)
     update(item, "generating", 10)
     make_demo(out)
@@ -662,7 +895,8 @@ def demo_job(item: dict, project_id: str, target: float):
     d, w, h, fps = metadata(out)
     project.update(duration=round(d, 3), width=w, height=h, fps=round(fps, 3))
     store.save(project)
-    return analyze_job(item, project_id, min(target, 30))
+    update(item, "source ready", 95)
+    return {}
 
 
 def export_job(item: dict, project_id: str, clip_ids: list[str], expected_revisions: dict | None = None):
@@ -933,6 +1167,106 @@ def list_projects():
     return [public_project(project) for project in store.list()]
 
 
+@app.get("/api/storage")
+def storage_summary():
+    return _storage_summary()
+
+
+@app.patch("/api/projects/{project_id}")
+def patch_project(project_id: str, body: ProjectPatch):
+    project_id = safe_identifier(project_id)
+    with submission_lock, jobs_lock, projects_lock:
+        project = store.get(project_id)
+        if not project:
+            raise HTTPException(404, "project not found")
+        changes = body.model_dump(exclude_unset=True)
+        if not changes:
+            return public_project(project)
+        if "title" in changes:
+            title = changes["title"]
+            if not isinstance(title, str):
+                raise HTTPException(422, "title must be a string")
+            title = title.strip()
+            if not title or len(title) > 120:
+                raise HTTPException(422, "title must be 1..120 non-whitespace characters")
+            changes["title"] = title
+        if "tags" in changes:
+            tags = changes["tags"]
+            if not isinstance(tags, list) or len(tags) > 8:
+                raise HTTPException(422, "tags must contain at most 8 values")
+            normalized: list[str] = []
+            for tag in tags:
+                if not isinstance(tag, str):
+                    raise HTTPException(422, "each tag must be a string")
+                tag = tag.strip()
+                if not 1 <= len(tag) <= 24:
+                    raise HTTPException(422, "each tag must be 1..24 non-whitespace characters")
+                normalized.append(tag)
+            changes["tags"] = normalized
+        for flag in ("favorite", "archived"):
+            if flag in changes and not isinstance(changes[flag], bool):
+                raise HTTPException(422, f"{flag} must be a boolean")
+        if changes.get("archived") is True and _project_has_active_job(project_id):
+            raise HTTPException(409, "wait for the project job to finish before archiving")
+        changed = any(project.get(key) != value for key, value in changes.items())
+        if changed:
+            project.update(changes)
+            project["updated_at"] = utc_now()
+            store.save(project)
+        return public_project(project)
+
+
+def _cleanup_project_previews_locked(project_id: str):
+    project_id = safe_identifier(project_id)
+    if not store.get(project_id):
+        raise HTTPException(404, "project not found")
+    if _project_has_active_job(project_id):
+        raise HTTPException(409, "wait for the project job to finish before cleaning previews")
+    root = Path(store.files).resolve()
+    project_dir = root / project_id
+    try:
+        project_dir.relative_to(root)
+    except ValueError:
+        raise HTTPException(400, "invalid project path")
+    if project_dir.is_symlink():
+        raise HTTPException(400, "invalid project path")
+    if not project_dir.exists():
+        return {"project_id": project_id, "freed_bytes": 0, "removed_count": 0}
+    freed_bytes = 0
+    removed_count = 0
+    try:
+        candidates = list(project_dir.iterdir())
+    except OSError:
+        candidates = []
+    for path in candidates:
+        if path.is_symlink() or not path.is_file():
+            continue
+        if not (path.name.startswith("preview-") and path.suffix.lower() == ".mp4"):
+            continue
+        try:
+            resolved = path.resolve()
+            resolved.relative_to(project_dir)
+            size = resolved.stat().st_size
+            resolved.unlink()
+            freed_bytes += size
+            removed_count += 1
+        except (OSError, ValueError):
+            continue
+    _invalidate_storage_summary()
+    return {
+        "project_id": project_id,
+        "freed_bytes": freed_bytes,
+        "removed_count": removed_count,
+    }
+
+
+@app.post("/api/projects/{project_id}/cleanup")
+def cleanup_project_previews(project_id: str):
+    project_id = safe_identifier(project_id)
+    with submission_lock, jobs_lock, projects_lock:
+        return _cleanup_project_previews_locked(project_id)
+
+
 @app.post("/api/projects/upload")
 async def upload_project(
     file: UploadFile = File(...), target_duration: float = Form(30)
@@ -968,26 +1302,27 @@ async def upload_project(
     return submit(project["id"], upload_job, project["id"], target_duration)
 
 
+@app.post("/api/sources/youtube/inspect")
+def inspect_youtube_source(body: YouTubeInspectInput):
+    """Return YouTube metadata for the quality picker without downloading media."""
+    try:
+        return probe_youtube(body.url)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(502, str(exc)) from exc
+    except Exception as exc:
+        # yt-dlp exposes provider/network errors as several exception types.
+        # Keep provider details useful to the UI while avoiding a server 500.
+        raise HTTPException(502, f"Could not inspect YouTube video: {str(exc)[:500]}") from exc
+
+
 @app.post("/api/projects/youtube")
 def youtube_project(body: YouTubeInput):
-    from urllib.parse import urlparse
-
-    parsed = urlparse(body.url)
-    host = (parsed.hostname or "").lower()
-    if (
-        parsed.scheme not in {"https", "http"}
-        or parsed.username
-        or parsed.password
-        or host
-        not in {
-            "youtube.com",
-            "www.youtube.com",
-            "m.youtube.com",
-            "youtu.be",
-            "www.youtu.be",
-        }
-    ):
-        raise HTTPException(400, "Enter a valid YouTube video URL.")
+    try:
+        normalized_url = validate_youtube_url(body.url)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
     pid = store.create_id()
     project = store.save(
         {
@@ -1002,11 +1337,13 @@ def youtube_project(body: YouTubeInput):
             "clips": [],
             "transcript": [],
             "created_at": utc_now(),
+            "source_origin_url": normalized_url,
+            "source_quality": body.quality,
         }
     )
     # Placeholder extension is replaced by the downloader; this file is not served until ready.
     (store.files / f"{pid}.mp4").touch()
-    return submit(pid, youtube_job, pid, body.url, body.target_duration)
+    return submit(pid, youtube_job, pid, normalized_url, body.target_duration, body.quality)
 
 
 @app.post("/api/projects/demo")
@@ -1080,6 +1417,7 @@ def retry_job(job_id: str):
     if old.get("status") in {"queued", "running"} or old.get("cancel_requested"):
         raise HTTPException(409, "wait for cancellation to finish before retrying")
     handlers = {
+        "generate_clips_job": generate_clips_job,
         "analyze_job": analyze_job,
         "upload_job": upload_job,
         "youtube_job": youtube_job,
@@ -1106,14 +1444,27 @@ def get_project(project_id: str):
 
 def public_project(project: dict) -> dict:
     """Keep recognition cache/trash payloads server-side, with a recovery flag."""
-    return {
+    result = {
         **{
             key: val
             for key, val in project.items()
-            if key not in {"speech_cache", "clip_trash"}
+            if key not in {"speech_cache", "clip_trash", "generation_speech"}
         },
         "can_restore_clips": bool(project.get("clip_trash")),
     }
+    project_id = str(project.get("id", ""))
+    result["favorite"] = bool(project.get("favorite", False))
+    result["archived"] = bool(project.get("archived", False))
+    tags = project.get("tags", [])
+    result["tags"] = list(tags) if isinstance(tags, list) else []
+    result["updated_at"] = project.get("updated_at") or project.get("created_at") or utc_now()
+    try:
+        safe_identifier(project_id)
+        thumbnail_path = store.files / f"{project_id}.jpg"
+        result["thumbnail_ready"] = thumbnail_path.is_file() and not thumbnail_path.is_symlink()
+    except HTTPException:
+        result["thumbnail_ready"] = False
+    return result
 
 
 def range_response(path: Path, request_range: str | None):
@@ -1206,10 +1557,21 @@ CLIP_FIELDS = {
     "end",
     "selected",
     "framing",
+    "aspect_ratio",
+    "camera_motion",
+    "camera_zoom",
+    "camera_auto_zoom",
+    "camera_strategy",
+    "vision_provider",
+    "safe_framing",
+    "camera_dead_zone",
+    "camera_keyframes",
     "focus_x",
     "smoothing",
     "caption_text",
     "caption_style",
+    "caption_font",
+    "caption_size",
     "caption_color",
     "caption_position",
     "caption_x",
@@ -1228,10 +1590,21 @@ MEDIA_CLIP_FIELDS = {
     "start",
     "end",
     "framing",
+    "aspect_ratio",
+    "camera_motion",
+    "camera_zoom",
+    "camera_auto_zoom",
+    "camera_strategy",
+    "vision_provider",
+    "safe_framing",
+    "camera_dead_zone",
+    "camera_keyframes",
     "focus_x",
     "smoothing",
     "caption_text",
     "caption_style",
+    "caption_font",
+    "caption_size",
     "caption_color",
     "caption_position",
     "caption_x",
@@ -1263,8 +1636,32 @@ def validate_clip(clip: dict, duration: float):
                 raise ValueError
         if clip["resolution"] not in (180, 360, 720, 1080):
             raise ValueError
-        if clip["framing"] not in ("follow", "manual", "fit"):
+        if clip["framing"] not in ("follow", "manual", "fit", "blur"):
             raise ValueError
+        if clip.get("aspect_ratio", "9:16") not in ("9:16", "1:1", "4:5", "16:9"):
+            raise ValueError
+        if clip.get("camera_motion", "smooth") not in ("steady", "smooth", "dynamic"):
+            raise ValueError
+        if not isinstance(clip.get("camera_auto_zoom", False), bool):
+            raise ValueError
+        for field, default, low, high in (("camera_zoom", 1, 1, 1.5), ("camera_dead_zone", .08, 0, .3)):
+            raw = clip.get(field, default)
+            if isinstance(raw, bool) or not isinstance(raw, (int,float)) or not math.isfinite(raw) or not low <= raw <= high:
+                raise ValueError
+        keyframes = clip.get("camera_keyframes", [])
+        if not isinstance(keyframes, list) or len(keyframes) > 50:
+            raise ValueError
+        previous_time = -1.0
+        for frame in keyframes:
+            if not isinstance(frame, dict) or set(frame) != {"time", "x", "y", "zoom"}:
+                raise ValueError
+            for field, low, high in (("time", 0, duration), ("x", 0, 1), ("y", 0, 1), ("zoom", 1, 1.5)):
+                raw=frame[field]
+                if isinstance(raw, bool) or not isinstance(raw,(int,float)) or not math.isfinite(raw) or not low <= raw <= high:
+                    raise ValueError
+            if frame["time"] <= previous_time:
+                raise ValueError
+            previous_time = frame["time"]
         if clip.get("subject", "auto") not in ("auto", "left", "right"):
             raise ValueError
         if clip.get("suggestion_status", "pending") not in (
@@ -1274,6 +1671,17 @@ def validate_clip(clip: dict, duration: float):
         ):
             raise ValueError
         if not isinstance(clip.get("reviewed", False), bool):
+            raise ValueError
+        for field, default, choices in (
+            ("camera_strategy", "adaptive", ("adaptive", "follow", "manual")),
+            ("vision_provider", "local", ("local", "gemini")),
+            ("safe_framing", "fit", ("fit", "blur")),
+            ("caption_font", "outfit", ("outfit", "anton", "noto-arabic")),
+        ):
+            if clip.get(field, default) not in choices:
+                raise ValueError
+        size = clip.get("caption_size", 52)
+        if isinstance(size, bool) or not isinstance(size, (int, float)) or not math.isfinite(size) or not 32 <= size <= 90:
             raise ValueError
         if clip["caption_style"] not in ("clean", "bold", "minimal"):
             raise ValueError
@@ -1415,16 +1823,15 @@ def delete_clip(project_id: str, clip_id: str):
 
 @app.post("/api/projects/{project_id}/clips/bulk")
 def bulk_clips(project_id: str, body: BulkClipsInput):
-    with projects_lock:
+    with submission_lock, jobs_lock, projects_lock:
         project = store.get(project_id)
         if not project:
             raise HTTPException(404, "project not found")
-        with jobs_lock:
-            busy = any(
-                job.get("project_id") == project_id
-                and job.get("status") in {"queued", "running"}
-                for job in jobs.values()
-            )
+        busy = any(
+            job.get("project_id") == project_id
+            and job.get("status") in {"queued", "running"}
+            for job in jobs.values()
+        )
         if busy:
             raise HTTPException(409, "Wait for the current job before removing clips.")
         if body.action == "delete":
@@ -1466,6 +1873,39 @@ def analyze(project_id: str, body: AnalyzeInput):
         if options
         else submit(project_id, analyze_job, project_id, body.target_duration)
     )
+
+
+@app.post("/api/projects/{project_id}/generate")
+def generate_project_clips(project_id: str, body: GenerateInput):
+    project = store.get(project_id)
+    if not project:
+        raise HTTPException(404, "Project not found.")
+    if any(row.end > project["duration"] for row in body.ranges):
+        raise HTTPException(400, "A time range extends beyond the source video.")
+    # Do not enqueue work that is known to be impossible; preserve the setup form.
+    source_path(project_id)
+    return submit(project_id, generate_clips_job, project_id, body.model_dump())
+
+
+@app.get("/api/projects/{project_id}/readiness")
+def project_readiness(project_id: str):
+    project = store.get(project_id)
+    if not project:
+        raise HTTPException(404, "Project not found.")
+    try:
+        source_file = source_path(project_id)
+    except HTTPException:
+        return {"source_ready": False, "message": "The source video is missing. Import the video again to start a new project."}
+    has_audio = any(stream.get("codec_type") == "audio" for stream in media.probe(source_file).get("streams", []))
+    if not has_audio:
+        return {"source_ready": True, "speech": {"ready": True, "provider": "no audio track", "warning": "Automatic mode will select visual moments with captions off."}}
+    if project.get("transcript"):
+        return {"source_ready": True, "speech": {"ready": True, "provider": "saved transcript", "warning": "Your corrected transcript will be reused."}}
+    provider = public_capabilities()["transcription"]
+    if provider.get("provider") == "local":
+        model = speech.model_readiness(source_file, {"quality": "auto"})
+        return {"source_ready": True, "speech": {key: val for key, val in model.items() if key != "cache_root"}}
+    return {"source_ready": True, "speech": {"provider": provider.get("provider"), "ready": provider.get("configured", False), "warning": provider.get("message", "")}}
 
 
 @app.post("/api/projects/{project_id}/transcribe")
@@ -1542,6 +1982,63 @@ def correct_transcript(project_id: str, body: TranscriptInput):
                     clip.pop("download_url", None)
             project["edit_revision"] = int(project.get("edit_revision", 0)) + 1
             store.save(project)
+        return public_project(project)
+
+
+@app.post("/api/projects/{project_id}/transcript/import")
+def import_transcript(project_id: str, body: TranscriptInput):
+    """Replace a project's transcript from an SRT/VTT parser's timed rows."""
+    project_id = safe_identifier(project_id)
+    with submission_lock, jobs_lock, projects_lock:
+        if any(
+            job.get("project_id") == project_id
+            and job.get("status") in {"queued", "running"}
+            for job in jobs.values()
+        ):
+            raise HTTPException(409, "Wait for the current job before importing a transcript.")
+        project = store.get(project_id)
+        if not project:
+            raise HTTPException(404, "project not found")
+        target = (
+            next((c for c in project["clips"] if c["id"] == body.clip_id), None)
+            if body.clip_id
+            else project
+        )
+        if target is None:
+            raise HTTPException(404, "clip not found")
+        rows = [segment.model_dump() for segment in body.segments]
+        if sum(len(row["text"]) for row in rows) > 1_000_000:
+            raise HTTPException(422, "Transcript text is too long.")
+        duration = float(project.get("duration") or 0)
+        if rows and (not math.isfinite(duration) or duration <= 0):
+            raise HTTPException(422, "Transcript cannot be imported without a positive source duration.")
+        for row in rows:
+            row["text"] = row["text"].strip()
+            if row["end"] <= row["start"]:
+                raise HTTPException(422, "Transcript segment end must be after its start.")
+            if row["end"] > duration:
+                raise HTTPException(422, "Transcript segment is outside the source duration.")
+        if target.get("transcript") == rows:
+            return public_project(project)
+        target["transcript"] = rows
+        affected_clips = (
+            [target]
+            if body.clip_id
+            else [
+                clip
+                for clip in project.get("clips", [])
+                if "transcript" not in clip and not clip.get("caption_text")
+            ]
+        )
+        for clip in affected_clips:
+            if body.clip_id or not clip.get("caption_text"):
+                clip["revision"] = int(clip.get("revision", 1)) + 1
+                clip["status"] = "draft"
+                clip.pop("download_url", None)
+                clip.pop("preview_revision", None)
+        project["edit_revision"] = int(project.get("edit_revision", 0)) + 1
+        project["updated_at"] = utc_now()
+        store.save(project)
         return public_project(project)
 
 
@@ -1652,6 +2149,14 @@ from .generation import register as register_generation
 generation_handler = register_generation(
     app, submit, store, create_project, analyze_job, update
 )
+
+from .publishing import register as register_publishing
+
+publishing_handler = register_publishing(app, lambda: store, locks={"projects": projects_lock})
+
+from .desktop_download import register as register_desktop
+
+register_desktop(app)
 
 frontend = ROOT / "frontend" / "dist"
 if frontend.exists():

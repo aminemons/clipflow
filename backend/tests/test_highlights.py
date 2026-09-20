@@ -32,6 +32,41 @@ def test_topic_changes_the_selected_interval(monkeypatch, tmp_path):
     assert "matches the requested topic" in baking[0]["reason"]
 
 
+def test_long_topic_requires_more_than_three_incidental_words():
+    terms = highlights._topic_terms("alpha beta gamma delta epsilon zeta")
+    assert highlights._topic_score("alpha beta gamma unrelated", terms) < 1.0
+    assert highlights._topic_score(
+        "alpha beta gamma delta epsilon", terms
+    ) == 1.0
+
+
+def test_local_score_prefers_clip_near_requested_duration():
+    candidates = [
+        {
+            "id": 0,
+            "start": 0.0,
+            "end": 4.0,
+            "duration": 4.0,
+            "text": "same useful passage",
+            "density": 1.0,
+            "info": 0.5,
+        },
+        {
+            "id": 1,
+            "start": 8.0,
+            "end": 10.0,
+            "duration": 2.0,
+            "text": "same useful passage",
+            "density": 1.0,
+            "info": 0.5,
+        },
+    ]
+    for candidate in candidates:
+        candidate["target"] = 4.0
+    ranked = highlights._rank_candidates(candidates, "useful")
+    assert ranked[0]["id"] == 0
+
+
 def test_source_bounds_tolerance_and_no_duplicate_intervals(monkeypatch, tmp_path):
     _local_media(monkeypatch, 10)
     source = tmp_path / "source.mp4"

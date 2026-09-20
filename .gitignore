@@ -18,3 +18,5 @@ frontend/public/fonts/NeueEinstellung-*.woff2
 vercel.json
 .env.*
 !.env.example
+build/
+Clipflow.spec
