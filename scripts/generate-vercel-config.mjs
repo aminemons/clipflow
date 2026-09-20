@@ -1,5 +1,21 @@
-import { writeFileSync } from 'node:fs'
+import { mkdirSync, writeFileSync } from 'node:fs'
+import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+
+const repositoryRoot = resolve(fileURLToPath(new URL('..', import.meta.url)))
+const frontendRoot = resolve(repositoryRoot, 'frontend')
+
+function outputArgument() {
+  const equals = process.argv.find((argument) => argument.startsWith('--output='))
+  if (equals) return equals.slice('--output='.length)
+  const index = process.argv.indexOf('--output')
+  if (index === -1) return ''
+  const value = process.argv[index + 1]
+  if (!value || value.startsWith('--')) {
+    throw new Error('--output requires a destination file path.')
+  }
+  return value
+}
 
 const raw = (process.env.CLIPFLOW_WORKER_ORIGIN || '').trim().replace(/\/$/, '')
 if (!raw) {
@@ -26,11 +42,16 @@ if (
 }
 
 const workerOrigin = origin.origin
+const outputPath = resolve(
+  process.cwd(),
+  outputArgument() || process.env.CLIPFLOW_VERCEL_CONFIG || resolve(repositoryRoot, 'vercel.json'),
+)
+const frontendProject = resolve(dirname(outputPath)) === frontendRoot
 const config = {
   framework: 'vite',
-  installCommand: 'npm ci --prefix frontend',
-  buildCommand: 'npm run build --prefix frontend',
-  outputDirectory: 'frontend/dist',
+  installCommand: frontendProject ? 'npm ci' : 'npm ci --prefix frontend',
+  buildCommand: frontendProject ? 'npm run build' : 'npm run build --prefix frontend',
+  outputDirectory: frontendProject ? 'dist' : 'frontend/dist',
   rewrites: [
     { source: '/api/:path*', destination: `${workerOrigin}/api/:path*` },
     { source: '/media/:path*', destination: `${workerOrigin}/media/:path*` },
@@ -47,4 +68,6 @@ const config = {
   ],
 }
 
-writeFileSync(fileURLToPath(new URL('../vercel.json', import.meta.url)), `${JSON.stringify(config, null, 2)}\n`)
+mkdirSync(dirname(outputPath), { recursive: true })
+writeFileSync(outputPath, `${JSON.stringify(config, null, 2)}\n`)
+console.log(`Wrote ${outputPath}`)

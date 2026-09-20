@@ -16,6 +16,7 @@ frontend/public/fonts/NeueEinstellung-*.woff2
 .vercel/
 # Generated for the chosen persistent worker; see docs/HOSTING.md.
 vercel.json
+!frontend/vercel.json
 .env.*
 !.env.example
 build/

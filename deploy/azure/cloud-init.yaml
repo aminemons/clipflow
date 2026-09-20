@@ -1,0 +1,43 @@
+#cloud-config
+# Ubuntu 24.04 VM bootstrap. Copy the source tree to /opt/clipflow before
+# running the deploy command; this file does not contain credentials or clone
+# a private repository.
+package_update: true
+packages:
+  - ca-certificates
+  - curl
+  - git
+write_files:
+  - path: /usr/local/sbin/clipflow-azure-bootstrap
+    permissions: "0755"
+    content: |
+      #!/usr/bin/env bash
+      set -Eeuo pipefail
+
+      source_dir=/opt/clipflow
+      compose_file="$source_dir/deploy/azure/compose.yaml"
+      env_file="$source_dir/.env"
+
+      install -m 0755 -d /etc/apt/keyrings
+      curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
+        -o /etc/apt/keyrings/docker.asc
+      chmod a+r /etc/apt/keyrings/docker.asc
+      . /etc/os-release
+      printf 'deb [arch=%s signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu %s stable\n' \
+        "$(dpkg --print-architecture)" "$VERSION_CODENAME" \
+        > /etc/apt/sources.list.d/docker.list
+      apt-get update
+      apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+      systemctl enable --now docker
+
+      if [[ ! -f "$compose_file" || ! -s "$env_file" ]]; then
+        echo "Docker is ready. Copy Clipflow source to $source_dir and create $env_file from deploy/azure/hosted.env.example, then run the documented compose command." >&2
+        exit 0
+      fi
+
+      chmod 600 "$env_file"
+      cd "$source_dir"
+      docker compose --env-file "$env_file" -f "$compose_file" up -d --build --remove-orphans
+      docker compose --env-file "$env_file" -f "$compose_file" ps
+runcmd:
+  - [bash, /usr/local/sbin/clipflow-azure-bootstrap]

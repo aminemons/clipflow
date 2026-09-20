@@ -1,0 +1,73 @@
+services:
+  clipflow:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    expose:
+      - "8767"
+    environment:
+      CLIPFLOW_MODE: hosted
+      CLIPFLOW_PUBLIC_ORIGIN: ${CLIPFLOW_PUBLIC_ORIGIN:?Set CLIPFLOW_PUBLIC_ORIGIN in /opt/clipflow/.env}
+      SUPABASE_URL: ${SUPABASE_URL:?Set SUPABASE_URL in /opt/clipflow/.env}
+      SUPABASE_PUBLISHABLE_KEY: ${SUPABASE_PUBLISHABLE_KEY:?Set SUPABASE_PUBLISHABLE_KEY in /opt/clipflow/.env}
+      CLIPFLOW_OWNER_ID: ${CLIPFLOW_OWNER_ID:?Set CLIPFLOW_OWNER_ID in /opt/clipflow/.env}
+      CLIPFLOW_SESSION_TTL_SECONDS: ${CLIPFLOW_SESSION_TTL_SECONDS:-28800}
+      CLIPFLOW_DATA: /app/data
+      CLIPFLOW_SETTINGS_FILE: /app/data/settings.env
+      CLIPFLOW_MODEL_CACHE: /app/data/models
+      PORT: "8767"
+      CLIPFLOW_TRANSCRIPTION_PROVIDER: ${CLIPFLOW_TRANSCRIPTION_PROVIDER:-local}
+      CLIPFLOW_TRANSCRIPTION_QUALITY: ${CLIPFLOW_TRANSCRIPTION_QUALITY:-balanced}
+      CLIPFLOW_WHISPER_MODEL: ${CLIPFLOW_WHISPER_MODEL:-}
+      CLIPFLOW_WHISPER_DEVICE: ${CLIPFLOW_WHISPER_DEVICE:-cpu}
+      CLIPFLOW_WHISPER_COMPUTE: ${CLIPFLOW_WHISPER_COMPUTE:-int8}
+      CLIPFLOW_WHISPER_THREADS: "2"
+      CLIPFLOW_HIGHLIGHT_PROVIDER: ${CLIPFLOW_HIGHLIGHT_PROVIDER:-local}
+      CLIPFLOW_HIGGSFIELD_ENABLED: ${CLIPFLOW_HIGGSFIELD_ENABLED:-false}
+      CLIPFLOW_LANGUAGE: ${CLIPFLOW_LANGUAGE:-auto}
+      CLIPFLOW_DIALECT: ${CLIPFLOW_DIALECT:-none}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      GROQ_WHISPER_MODEL: ${GROQ_WHISPER_MODEL:-whisper-large-v3-turbo}
+      GROQ_HIGHLIGHT_MODEL: ${GROQ_HIGHLIGHT_MODEL:-llama-3.3-70b-versatile}
+      HF_API_KEY: ${HF_API_KEY:-}
+      HF_API_SECRET: ${HF_API_SECRET:-}
+      OMP_NUM_THREADS: "2"
+      MKL_NUM_THREADS: "2"
+      OPENBLAS_NUM_THREADS: "2"
+    volumes:
+      - clipflow-data:/app/data
+      - clipflow-models:/app/data/models
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+  caddy:
+    image: caddy:2-alpine
+    environment:
+      CLIPFLOW_DOMAIN: ${CLIPFLOW_DOMAIN:?Set CLIPFLOW_DOMAIN in /opt/clipflow/.env}
+    depends_on:
+      clipflow:
+        condition: service_healthy
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+
+volumes:
+  clipflow-data:
+  clipflow-models:
+  caddy-data:
+  caddy-config:

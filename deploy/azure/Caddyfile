@@ -1,0 +1,4 @@
+{$CLIPFLOW_DOMAIN} {
+  encode gzip
+  reverse_proxy clipflow:8767
+}

@@ -30,7 +30,7 @@ On the Vite side, `main.tsx` wraps `<App />` with `<HostedGate>`. The gate probe
 
 The browser should call relative `/api/...` and `/media/...` URLs. Configure the Vercel project to proxy both prefixes to the persistent worker origin over HTTPS, with the worker origin stored as deployment configuration rather than committed source. Large multipart uploads through the external rewrite remain unverified on a live deployment; a serverless function proxy must not be used for source uploads because normal Vercel request body limits are far below Clipflow's local 500 MiB limit. The proxy must preserve `Cookie`, `Content-Type`, `Origin`, and response `Set-Cookie` headers.
 
-For a generated rewrite file, set the worker origin in the deployment environment and run `CLIPFLOW_WORKER_ORIGIN=https://worker.example.com node scripts/generate-vercel-config.mjs` before `vercel deploy`. Run from the repository root and keep the Vercel root directory at the repository root: the generated file includes the frontend install/build commands and `frontend/dist` output directory. Set `VITE_CLIPFLOW_MODE=hosted` on the frontend deployment. The generated file is ignored by Git. This configuration has not been deployed without an actual worker host. The script rejects missing, HTTP, localhost, loopback, credential-bearing, or path-qualified origins; it never emits a localhost fallback.
+For a generated rewrite file, set the worker origin in the deployment environment and run `CLIPFLOW_WORKER_ORIGIN=https://worker.example.com node scripts/generate-vercel-config.mjs` before `vercel deploy`. Run from the repository root and keep the Vercel root directory at the repository root: the generated file includes the frontend install/build commands and `frontend/dist` output directory. If the Vercel project root directory is `frontend`, generate its tracked project config with `CLIPFLOW_WORKER_ORIGIN=https://worker.example.com node scripts/generate-vercel-config.mjs --output frontend/vercel.json`; that variant uses `npm ci`, `npm run build`, and `dist`. Set `VITE_CLIPFLOW_MODE=hosted` on the frontend deployment. The repository-root generated file is ignored by Git; `frontend/vercel.json` is intentionally allowed for a Vercel project whose root is `frontend`. This configuration has not been deployed without an actual worker host. The script rejects missing, HTTP, localhost, loopback, credential-bearing, or path-qualified origins; it never emits a localhost fallback.
 
 The external worker origin must be HTTPS and must not be localhost or a loopback address. Keep the Vercel frontend and worker on the same public origin from the browser's point of view; this lets the Secure HttpOnly cookie accompany API and media requests without exposing it to JavaScript. If a rewrite is generated from an environment variable, fail the deployment script when the variable is absent or not HTTPS rather than falling back to localhost.
 
@@ -39,6 +39,17 @@ The worker needs persistent storage for `CLIPFLOW_DATA`, enough temporary disk f
 The container listens on `PORT` when a host supplies it and uses `8767` otherwise. Set `CLIPFLOW_MODEL_CACHE=/app/data/models` (the Docker image default) so local Whisper downloads stay on the persistent data volume. The Docker build context excludes generated desktop artifacts, local data, tests, docs, dependency caches, archives, `.env` files, and the private Neue font binaries; provider secrets and user media must be supplied through the host environment or volume only.
 
 For Azure container hosting, configure ingress to the container port (`8767` by default, or the value supplied through `PORT`) and mount persistent storage at `CLIPFLOW_DATA`. The default container filesystem is not a safe home for projects, source media, exports, settings, or downloaded speech models.
+
+### Azure VM source deploy
+
+The repository includes an Ubuntu 24.04 cloud-init bootstrap at `deploy/azure/cloud-init.yaml` and a Caddy-fronted Compose file at `deploy/azure/compose.yaml`. They expect the source tree at `/opt/clipflow`, keep the API on the internal Docker network, expose only Caddy on ports 80 and 443, and persist `/app/data` plus `/app/data/models` in named volumes. Copy `deploy/azure/hosted.env.example` to `/opt/clipflow/.env`, set the domain and hosted Supabase values, then run:
+
+```bash
+cd /opt/clipflow
+docker compose --env-file /opt/clipflow/.env -f /opt/clipflow/deploy/azure/compose.yaml up -d --build --remove-orphans
+```
+
+The cloud-init script installs Docker Engine and Compose from Docker's Ubuntu repository. If `/opt/clipflow` or its hosted environment file is not present yet, bootstrap completes with Docker ready and prints the follow-up command; otherwise it starts the stack immediately. It never creates Azure resources or embeds credentials.
 
 ## Verification
 
