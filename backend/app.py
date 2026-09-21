@@ -884,9 +884,6 @@ def youtube_job(
         shutil.move(str(candidates[0]), str(out))
     except ImportError as e:
         raise RuntimeError("YouTube support requires yt-dlp") from e
-    except YouTubeSourceError:
-        _cleanup_youtube_downloads(project_id)
-        raise
     except BaseException:
         _cleanup_youtube_downloads(project_id)
         raise

@@ -82,7 +82,7 @@ def classify_youtube_error(exc: BaseException, operation: str = "inspect") -> Yo
             "YouTube reports that this video is unavailable, removed, or restricted. Check the URL and choose another public video.",
             operation=operation,
         )
-    if re.search(r"timed out|timeout|temporary failure|connection (?:reset|Refused)|network", text):
+    if re.search(r"timed out|timeout|temporary failure|connection (?:reset|refused)|network", text):
         return YouTubeSourceError(
             "youtube_network",
             "YouTube could not be reached right now. Check the connection and retry.",

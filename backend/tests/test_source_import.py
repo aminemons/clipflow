@@ -121,6 +121,9 @@ def test_classify_download_error_has_stable_actionable_shape():
     assert set(error.as_dict()) == {
         "code", "message", "operation", "help_url", "retryable"
     }
+    refused = classify_youtube_error(ConnectionRefusedError("Connection refused"))
+    assert refused.code == "youtube_network"
+    assert refused.retryable is True
 
 
 def test_upload_job_only_prepares_source_and_keeps_clips_empty(monkeypatch, tmp_path: Path):

@@ -7,7 +7,8 @@ This record distinguishes automated evidence from manual checks and from work th
 - Backend suite: **157 passed, 2 warnings in 47.89s** in a fresh temporary `CLIPFLOW_DATA` directory with local transcription mode. The warnings were Starlette/httpx test-harness deprecations.
 - Frontend TypeScript/Vite production build passed with 1,617 modules.
 - Frontend `npm test` passed the subtitle import checks and six clip-library regression tests.
-- The launcher suite under `tests/` passed separately: **8 passed**.
+- The integration suite under `tests/` passed separately: **8 passed**, covering real video import, clip edits, framing, and exports.
+- Vite was updated to 6.4.3 with React plugin 4.7.0. The production build, frontend tests, and `npm audit --audit-level=moderate` passed; the audit reported zero known vulnerabilities.
 - Python bytecode compilation passed for `backend` and `launch.py`.
 - Backend tests cover imports and uploads, path safety, media ranges, full-source segmentation, transcript edits and SRT, caption rendering, framing, audio edits, export invalidation, batch ZIPs, job deduplication/cancellation, temporary-file cleanup, provider contracts, and hosted-auth boundaries.
 
@@ -22,12 +23,14 @@ This record distinguishes automated evidence from manual checks and from work th
 - On 2026-09-21, the local browser workflow used a synthetic 12-second project at desktop and narrow responsive sizes. Structural clip generation, rename, trim, caption edits, 360p proof rendering, duplicate, keep/discard/restore, selection filters, clear-all/undo, persistence, and batch ZIP download all completed; the real proof reported 360x640 video metadata, 3.8 seconds, and no error. The 23-step tour reached all application pages.
 - Responsive checks at 880x560 and 400x680 exposed a collapsed right-panel layout issue that was fixed during the session. The final mobile setup check confirmed a readable step rail, scrolling content, and a reachable Generate button at the bottom of the viewport, without horizontal page overflow.
 - Individual MP4 export completed and its browser download event was received. The final browser console check reported no errors.
+- Duplicating a clip after rendering its proof returned the new clip to the source preview; it did not reuse the original clip's proof URL.
 - The browser file chooser was blocked by the browser's file-URL access setting. A 12 MB multipart upload through the API passed; browser upload itself is not claimed as verified.
 
 ## Hosted deployment evidence
 
 - The current hosted layout is Vercel frontend → HTTPS Caddy proxy → one Azure Docker worker, with Supabase Auth for one owner and persistent worker disk for project data and media. Supabase Storage is not part of the data path.
 - The configured frontend is [clipflow-aminemons.vercel.app](https://clipflow-aminemons.vercel.app). The worker health route returned HTTP 200 through the HTTPS proxy; unauthenticated session and projects probes returned the expected protected responses. This verifies routing and protection boundaries, not a signed-in owner workflow.
+- On 2026-09-21, revision `b476878` deployed successfully through Vercel and the Azure worker was rebuilt. The proxied health endpoint returned `{"ready": true}`. A real YouTube metadata probe on the worker returned the new `youtube_anti_bot` diagnosis; the provider still blocks that cloud request. A fresh owner sign-in is needed after the worker restart to finish authenticated browser checks.
 - The hosted deployment uses one in-process worker. Restart behavior, queued-job recovery, persistent volume recovery, and large multipart uploads remain operational checks for the live VM.
 - Optional live provider calls were not performed. Mock provider contracts and missing-credential/error handling are covered by tests. No paid provider account or credits are part of this deployment.
 - No live paid-provider calls or social publishing actions were performed during the 2026-09-21 checks.
