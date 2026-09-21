@@ -33,6 +33,13 @@ This record distinguishes automated evidence from manual checks and from work th
 - On 2026-09-21, revision `7cecc38` deployed successfully through Vercel and the Azure worker was rebuilt. The proxied health endpoint returned `{"ready": true}`. A real YouTube metadata probe on the worker returned the new `youtube_anti_bot` diagnosis; the provider still blocks that cloud request. A fresh owner sign-in is needed after the worker restart to finish authenticated browser checks.
 - The hosted deployment uses one in-process worker. Restart behavior, queued-job recovery, persistent volume recovery, and large multipart uploads remain operational checks for the live VM.
 - Optional live provider calls were not performed. Mock provider contracts and missing-credential/error handling are covered by tests. No paid provider account or credits are part of this deployment.
+
+## Windows package, 2026-09-21
+
+- The rebuilt portable executable passed `Clipflow.exe --self-test` and a fresh-data demo-to-MP4 export check. The downloaded four-second clip was 85,482 bytes.
+- The ZIP contains 363 entries and passed its CRC integrity check. It includes FFmpeg, FFprobe, Node.js 22.14.0, the YouTube solver support files, and the matching license notices.
+- The archive was checked for credentials, user projects/media, model caches, and private fonts; none were included.
+- ZIP SHA-256: `7e3deadb99f5dda69702d9d1d977ae2afa539b66b017674e2ae6e248f66e49de`.
 - No live paid-provider calls or social publishing actions were performed during the 2026-09-21 checks.
 
 ## Known limits and open checks

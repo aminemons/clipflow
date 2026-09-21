@@ -16,13 +16,11 @@ pwsh desktop/build.ps1
 
 This creates `build/desktop/Clipflow/Clipflow.exe` and
 `build/desktop/Clipflow-windows-x64.zip`. The build uses the existing
-frontend bundle and backend package, and installs only `pywebview` and
-`PyInstaller` in the selected Python environment. It includes the local
-FFmpeg tools by default:
-
-```powershell
-pwsh desktop/build.ps1
-```
+source tree, runs `npm ci` and the production frontend build, and installs
+the desktop-only packages in the selected Python environment. It includes
+FFmpeg/FFprobe and the PATH Node.js executable by default; Node is used by
+yt-dlp for current YouTube JavaScript challenges, and the `yt_dlp_ejs`
+support package is collected into the bundle.
 
 The FFmpeg build is large. For a source-only deployment, use
 `pwsh desktop/build.ps1 -WithoutFfmpeg` and put `ffmpeg.exe` and `ffprobe.exe`
@@ -46,8 +44,9 @@ API check. The self-test starts the same local service and verifies
 requirements.
 
 The editor's Settings page accepts optional Groq or Higgsfield keys. Local
-transcription remains the default; its speech model is downloaded on first
-use when the user chooses it, and models are kept outside the package.
+transcription remains the default and needs no paid API key. Its selected
+speech model is downloaded on first use when the user chooses it, and models
+are kept outside the package.
 
 ## Troubleshooting startup
 
@@ -73,4 +72,5 @@ The default build copies the FFmpeg and FFprobe binaries found on the builder's
 `resources/ffmpeg/FFmpeg-LICENSE.txt`. The exact binary build and its license
 terms are therefore visible in each artifact; distributors should retain that
 notice and provide the corresponding FFmpeg source or source offer required by
-the binary's LGPL/GPL configuration.
+the binary's LGPL/GPL configuration. The matching Node.js license and
+third-party notices are stored beside `resources/node/node.exe`.

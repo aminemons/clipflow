@@ -64,6 +64,11 @@ def _configure_environment() -> tuple[Path, Path]:
     if ffmpeg_dir:
         os.environ["CLIPFLOW_FFMPEG_DIR"] = ffmpeg_dir
         os.environ["PATH"] = ffmpeg_dir + os.pathsep + os.environ.get("PATH", "")
+    bundle_node = _bundle_root() / "resources" / "node"
+    if not bundle_node.is_dir() and getattr(sys, "frozen", False):
+        bundle_node = Path(sys.executable).resolve().parent / "resources" / "node"
+    if bundle_node.is_dir() and (bundle_node / "node.exe").is_file():
+        os.environ["PATH"] = str(bundle_node) + os.pathsep + os.environ.get("PATH", "")
     return data_dir, settings_file
 
 

@@ -31,26 +31,17 @@ if ($LASTEXITCODE) {
 
 Push-Location $Repo
 try {
-  if (!(Test-Path "frontend\\node_modules")) { npm --prefix frontend ci }
+  npm --prefix frontend ci
+  if ($LASTEXITCODE) { throw "Frontend dependency installation failed." }
   npm --prefix frontend run build
   if ($LASTEXITCODE) { throw "Frontend build failed." }
   Remove-Item $Out -Recurse -Force -ErrorAction SilentlyContinue
   Remove-Item $Work -Recurse -Force -ErrorAction SilentlyContinue
   New-Item -ItemType Directory -Path $Out,$Work -Force | Out-Null
-  # Vite copies public fonts into dist. Stage a portable copy that removes
-  # private Neue Einstellung files and points the generated CSS at Outfit.
+  # Vite copies the bundled OFL fonts into dist. Stage a portable copy.
   $FrontendStage = Join-Path $Work "frontend-dist"
   New-Item -ItemType Directory -Path $FrontendStage -Force | Out-Null
   Copy-Item -Path (Join-Path $Repo "frontend\dist\*") -Destination $FrontendStage -Recurse -Force
-  Get-ChildItem -LiteralPath $FrontendStage -Recurse -File | ForEach-Object {
-    if ($_.Extension -in @('.css', '.js', '.html')) {
-      $text = Get-Content -LiteralPath $_.FullName -Raw
-      $text = $text -replace 'NeueEinstellung-[A-Za-z]+\.woff2', 'Outfit.ttf'
-      $text = $text -replace 'font-family:Neue', 'font-family:Outfit'
-      Set-Content -LiteralPath $_.FullName -Value $text -Encoding UTF8
-    }
-  }
-  Get-ChildItem -LiteralPath $FrontendStage -Recurse -File -Filter 'NeueEinstellung-*.woff2' | Remove-Item -Force
   $args = @(
     "--noconfirm", "--clean", "--onedir", "--name", "Clipflow",
     "--distpath", $Out, "--workpath", $Work,
@@ -58,6 +49,7 @@ try {
     "--hidden-import", "backend.app",
     "--hidden-import", "backend.settings", "--hidden-import", "backend.generation",
     "--hidden-import", "backend.export_artifacts", "--collect-submodules", "backend",
+    "--collect-all", "yt_dlp_ejs",
     "desktop\\launcher.py"
   )
   & $Python -m PyInstaller @args
@@ -65,10 +57,21 @@ try {
 
   $Resources = Join-Path $Out "Clipflow\\resources"
   New-Item -ItemType Directory -Path $Resources -Force | Out-Null
+  $node = (Get-Command node -ErrorAction SilentlyContinue).Source
+  if (!$node) { throw "Node.js was not found on PATH. Install Node.js before building the desktop package." }
+  $NodeDir = Join-Path $Resources "node"
+  New-Item -ItemType Directory -Path $NodeDir -Force | Out-Null
+  Copy-Item $node (Join-Path $NodeDir "node.exe") -Force
+  $NodeVersion = (& $node --version).Trim()
+  try {
+    Invoke-WebRequest -Uri "https://raw.githubusercontent.com/nodejs/node/$NodeVersion/LICENSE" -OutFile (Join-Path $NodeDir "Node-LICENSE.txt") -UseBasicParsing
+  } catch {
+    throw "Could not fetch the matching Node.js $NodeVersion license notice."
+  }
   if (!$WithoutFfmpeg) {
     $ffmpeg = (Get-Command ffmpeg -ErrorAction SilentlyContinue).Source
     $ffprobe = (Get-Command ffprobe -ErrorAction SilentlyContinue).Source
-    if (!$ffmpeg -or !$ffprobe) { throw "-WithFfmpeg requires ffmpeg.exe and ffprobe.exe on PATH." }
+    if (!$ffmpeg -or !$ffprobe) { throw "FFmpeg and FFprobe were not found on PATH. Install them or rerun with -WithoutFfmpeg." }
     $FfmpegDir = Join-Path $Resources "ffmpeg"
     New-Item -ItemType Directory -Path $FfmpegDir -Force | Out-Null
     Copy-Item $ffmpeg,$ffprobe $FfmpegDir
