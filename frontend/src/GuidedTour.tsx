@@ -1,7 +1,6 @@
 import {
   useCallback,
   useEffect,
-  useMemo,
   useRef,
   useState,
   type CSSProperties,
@@ -10,185 +9,265 @@ import {
 import "./GuidedTour.css";
 
 export type TourPage =
-  | "projects"
-  | "editor"
-  | "exports"
-  | "publish"
-  | "settings";
-
+  "projects" | "editor" | "exports" | "publish" | "settings";
 export type GuidedTourProps = {
   page: TourPage;
   onNavigate: (page: TourPage) => void;
   onReveal?: (target: string) => void;
   hasProject: boolean;
+  hasClips?: boolean;
+  onClose?: () => void;
   replayToken: number;
 };
-
 type TourStep = {
   page: TourPage;
-  target: string;
+  chapter: string;
+  target?: string;
   title: string;
   body: string;
+  needsProject?: boolean;
+  needsClips?: boolean;
 };
-
-type Rect = {
-  top: number;
-  left: number;
-  width: number;
-  height: number;
-};
-
 type Geometry = {
-  rect: Rect | null;
+  rect: { top: number; left: number; width: number; height: number };
   popover: { top: number; left: number };
   placement: "above" | "below" | "center";
 };
 
-const STORAGE_KEY = "clipflow:tour:v2";
-const POPOVER_WIDTH = 340;
-const ESTIMATED_POPOVER_HEIGHT = 220;
-
-const projectSteps: TourStep[] = [
+const STORAGE_KEY = "clipflow:tour:v3";
+const POPOVER_WIDTH = 360;
+const ESTIMATED_HEIGHT = 310;
+const tourSteps: TourStep[] = [
   {
     page: "projects",
+    chapter: "Start",
     target: "projects-nav",
-    title: "Your project space",
-    body: "Open a project from the library, or make a new one.",
+    title: "Your project library",
+    body: "Projects keep the source, editable clips, captions, and exports together. Start here whenever you need to return to work.",
   },
   {
     page: "projects",
-    target: "project-library",
-    title: "Project library",
-    body: "Your sources and recent work live here. Open one to continue.",
-  },
-  {
-    page: "projects",
+    chapter: "Start",
     target: "new-project",
-    title: "Create a project",
-    body: "Upload a file, or check a YouTube link and choose its download quality. Importing saves the source without creating clips.",
+    title: "Import a source",
+    body: "Choose a local video or inspect a YouTube link first. After Check video, choose a download quality and import. If YouTube blocks the request, upload your video file instead. Importing does not generate clips.",
   },
-];
-
-const editorSteps: TourStep[] = [
+  {
+    page: "projects",
+    chapter: "Start",
+    target: "project-library",
+    title: "Open the source",
+    body: "Open a project from the library to continue. Rename, tag, favorite, or archive projects from the library controls.",
+  },
   {
     page: "editor",
+    chapter: "Configure",
     target: "editor-generation",
     title: "Configure before generating",
-    body: "Choose moments, camera framing and captions in Clip setup. Review the settings, then choose Generate clips. Each result can be edited independently.",
+    body: "Clip setup is one reviewable pass: choose moments, framing, captions, and audio, then Generate clips.",
+    needsProject: true,
   },
   {
     page: "editor",
+    chapter: "Configure",
+    target: "setup-source",
+    title: "Check source details",
+    body: "Confirm the duration and dimensions. Use the source preview to mark exact ranges when you want manual moments.",
+    needsProject: true,
+  },
+  {
+    page: "editor",
+    chapter: "Configure",
+    target: "setup-moments",
+    title: "Choose moments",
+    body: "Smart highlights rank spoken or structural moments. Full source splits the whole video. Manual mode uses the ranges you add.",
+    needsProject: true,
+  },
+  {
+    page: "editor",
+    chapter: "Configure",
+    target: "setup-camera",
+    title: "Choose the crop",
+    body: "Adaptive and follow framing are evaluated during rendering. Fit preserves the full source; manual crop gives you a fixed composition.",
+    needsProject: true,
+  },
+  {
+    page: "editor",
+    chapter: "Configure",
+    target: "setup-captions",
+    title: "Set captions and audio",
+    body: "Choose automatic captions, one manual overlay, or no captions. Pick the font, size, color, position, language, and audio cleanup before generating.",
+    needsProject: true,
+  },
+  {
+    page: "editor",
+    chapter: "Configure",
+    target: "setup-review",
+    title: "Review the generation pass",
+    body: "Check the summary, then Generate clips. The results remain editable; generation does not publish or export by itself.",
+    needsProject: true,
+  },
+  {
+    page: "editor",
+    chapter: "Edit",
+    target: "editor-library",
+    title: "Review the clip library",
+    body: "Generated clips stay in the library as separate editable items. Select one to work on it without changing which clips are checked for export.",
+    needsProject: true,
+    needsClips: true,
+  },
+  {
+    page: "editor",
+    chapter: "Edit",
+    target: "editor-selection",
+    title: "Choose export clips",
+    body: "Use the library selection controls to choose the clips that will be exported. Working on a clip does not silently change this selection.",
+    needsProject: true,
+    needsClips: true,
+  },
+  {
+    page: "editor",
+    chapter: "Edit",
+    target: "editor-review",
+    title: "Mark clips for review",
+    body: "Review a rendered clip in the library and keep its review state visible while you work through a batch.",
+    needsProject: true,
+    needsClips: true,
+  },
+  {
+    page: "editor",
+    chapter: "Edit",
+    target: "editor-timeline",
+    title: "Trim the selected clip",
+    body: "Move the timeline handles or use the playhead to set the source start and end. Source timestamps stay separate from the rendered preview.",
+    needsProject: true,
+    needsClips: true,
+  },
+  {
+    page: "editor",
+    chapter: "Edit",
+    target: "editor-transcript",
+    title: "Correct the transcript",
+    body: "Use Transcript to search speech and correct recognition text. To import an SRT or VTT file, open Captions. Corrections keep their original timing.",
+    needsProject: true,
+    needsClips: true,
+  },
+  {
+    page: "editor",
+    chapter: "Edit",
+    target: "editor-captions",
+    title: "Style the captions",
+    body: "Open Captions to choose the overlay style, font, position, and whether captions are burned into the render.",
+    needsProject: true,
+    needsClips: true,
+  },
+  {
+    page: "editor",
+    chapter: "Edit",
     target: "editor-clip-name",
     title: "Name the selected clip",
-    body: "Give the clip a useful name while it is fresh. The name follows it through review, export, and publishing.",
+    body: "Give the selected clip a useful name so it is easy to identify in review, export, and publishing.",
+    needsProject: true,
+    needsClips: true,
   },
   {
     page: "editor",
+    chapter: "Edit",
     target: "editor-save",
-    title: "Save your settings",
-    body: "Save the camera and caption changes before rendering so the proof uses the settings you can review.",
+    title: "Save draft settings",
+    body: "Media edits are drafts. Save settings before you render or leave the editor; the status beside the action tells you whether the server has the latest values.",
+    needsProject: true,
+    needsClips: true,
   },
   {
     page: "editor",
+    chapter: "Review",
     target: "editor-render",
-    title: "Render a preview",
-    body: "Render a proof when you want to check the exact framing and captions before export.",
+    title: "Render the proof",
+    body: "Render preview to see the actual crop, caption burn-in, speed, and audio effects. Source playback does not simulate camera tracking.",
+    needsProject: true,
+    needsClips: true,
   },
   {
     page: "editor",
+    chapter: "Review",
     target: "editor-preview",
-    title: "Preview",
-    body: "Play the selected clip here and render a proof to check framing and captions.",
+    title: "Inspect the result",
+    body: "Play the rendered proof and seek it. If the framing or captions need work, edit the draft, save again, and render a new proof.",
+    needsProject: true,
+    needsClips: true,
   },
   {
     page: "editor",
-    target: "editor-timeline",
-    title: "Timeline",
-    body: "Set the in and out points precisely for this clip.",
-  },
-  {
-    page: "editor",
-    target: "editor-captions",
-    title: "Captions",
-    body: "Transcribe speech, import subtitles, choose a style, and position the text.",
-  },
-  {
-    page: "editor",
+    chapter: "Review",
     target: "editor-export",
-    title: "Export",
-    body: "Export this clip here, or export several clips together from the library.",
+    title: "Export the current clip",
+    body: "Export current renders just the clip open in the editor. For a batch, use the checkboxes and Export button in the clip library. The clip being edited and the clips checked for export are separate choices. Select one or several clips, then export an MP4 or ZIP.",
+    needsProject: true,
+    needsClips: true,
   },
-];
-
-const trailingSteps: TourStep[] = [
   {
     page: "exports",
+    chapter: "Deliver",
     target: "exports-nav",
-    title: "Exports",
-    body: "Download finished clips here and check processing progress or failed jobs.",
+    title: "Download finished files",
+    body: "Exports shows progress, errors, retries, and immutable download files. A later render does not replace an earlier export artifact.",
   },
   {
     page: "publish",
+    chapter: "Deliver",
     target: "publish-nav",
-    title: "Review before posting",
-    body: "Approve the rendered files, select the approved clips to post, and review destinations and text. Publishing requires a separate confirmation.",
+    title: "Review publishing",
+    body: "Publishing is a separate, explicit step. Approve rendered clips, choose destination accounts, review the plan, and confirm only when you intend to contact a provider.",
   },
   {
     page: "settings",
+    chapter: "Connect",
     target: "settings-nav",
-    title: "Settings",
-    body: "Choose transcription and highlight providers, save API keys, and manage storage.",
+    title: "Configure providers and accounts",
+    body: "Settings holds optional transcription, highlight, vision, B-roll, and publishing credentials. Keys stay server-side; local editing and export remain available without them.",
   },
 ];
 
-function readTourState(): string | null {
+function readState() {
   try {
     return window.localStorage.getItem(STORAGE_KEY);
   } catch {
     return null;
   }
 }
-
-function writeTourState(value: string) {
+function writeState(value: string) {
   try {
     window.localStorage.setItem(STORAGE_KEY, value);
   } catch {
-    // Private browsing and embedded previews may disable local storage.
+    /* storage is optional */
   }
 }
-
-function isVisible(element: HTMLElement) {
+function visible(element: HTMLElement) {
   const rect = element.getBoundingClientRect();
   const style = window.getComputedStyle(element);
   return (
     rect.width > 0 &&
     rect.height > 0 &&
-    style.visibility !== "hidden" &&
-    style.display !== "none"
+    style.display !== "none" &&
+    style.visibility !== "hidden"
   );
 }
-
-function findTarget(name: string) {
-  const targets = Array.from(
-    document.querySelectorAll<HTMLElement>("[data-tour]"),
-  );
-  return targets.find(
-    (element) => element.dataset.tour === name && isVisible(element),
+function findTarget(name?: string) {
+  if (!name) return null;
+  return (
+    Array.from(document.querySelectorAll<HTMLElement>("[data-tour]")).find(
+      (element) => element.dataset.tour === name && visible(element),
+    ) ?? null
   );
 }
-
-function getPageStart(steps: TourStep[], page: TourPage) {
-  const index = steps.findIndex((step) => step.page === page);
-  return index < 0 ? 0 : index;
-}
-
 function focusable(container: HTMLElement | null) {
   if (!container) return [];
   return Array.from(
     container.querySelectorAll<HTMLElement>(
       'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
     ),
-  ).filter((element) => isVisible(element));
+  ).filter(visible);
 }
 
 export default function GuidedTour({
@@ -196,24 +275,12 @@ export default function GuidedTour({
   onNavigate,
   onReveal,
   hasProject,
+  hasClips = false,
+  onClose,
   replayToken,
 }: GuidedTourProps) {
-  const allSteps = useMemo(
-    () => [
-      ...projectSteps,
-      ...(hasProject ? editorSteps : []),
-      ...trailingSteps,
-    ],
-    [hasProject],
-  );
-  // Keep the tour anchored to the screen the person is already using. A step
-  // that silently navigates away leaves the spotlight with no real target.
-  const steps = useMemo(
-    () => allSteps.filter((step) => step.page === page),
-    [allSteps, page],
-  );
   const [mode, setMode] = useState<"welcome" | "tour" | "closed">(() =>
-    readTourState() ? "closed" : "welcome",
+    readState() ? "closed" : "welcome",
   );
   const [stepIndex, setStepIndex] = useState(0);
   const [geometry, setGeometry] = useState<Geometry | null>(null);
@@ -221,36 +288,38 @@ export default function GuidedTour({
   const popoverRef = useRef<HTMLElement>(null);
   const welcomeRef = useRef<HTMLElement>(null);
   const returnFocusRef = useRef<HTMLElement | null>(null);
-  const lastReplayToken = useRef(replayToken);
-  const activeStep = steps[stepIndex];
-
+  const lastReplay = useRef(replayToken);
+  const activeStep = tourSteps[stepIndex];
+  const revealedTarget = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    revealedTarget.current = null;
+  }, [stepIndex]);
   const rememberFocus = useCallback(() => {
-    const current = document.activeElement;
-    returnFocusRef.current = current instanceof HTMLElement ? current : null;
+    returnFocusRef.current =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
   }, []);
-
   const restoreFocus = useCallback(() => {
     const element = returnFocusRef.current;
     returnFocusRef.current = null;
-    if (element && document.contains(element)) {
+    if (element && document.contains(element))
       window.setTimeout(() => element.focus(), 0);
-    }
   }, []);
-
   const closeTour = useCallback(
     (state: "dismissed" | "completed") => {
-      writeTourState(state);
+      writeState(state);
       setMode("closed");
       setGeometry(null);
       restoreFocus();
+      onClose?.();
     },
-    [restoreFocus],
+    [onClose, restoreFocus],
   );
-
   const startTour = useCallback(
     (index = 0) => {
       rememberFocus();
-      writeTourState("started");
+      writeState("started");
       setStepIndex(index);
       setGeometry(null);
       setMode("tour");
@@ -259,21 +328,26 @@ export default function GuidedTour({
   );
 
   useEffect(() => {
-    if (lastReplayToken.current === replayToken) return;
-    lastReplayToken.current = replayToken;
+    if (lastReplay.current === replayToken) return;
+    lastReplay.current = replayToken;
     startTour(0);
   }, [replayToken, startTour]);
-
   useEffect(() => {
-    if (mode !== "tour") return;
-    setStepIndex(0);
-    setGeometry(null);
-  }, [mode, page]);
-
-  useEffect(() => {
-    if (mode === "tour" && activeStep) onReveal?.(activeStep.target);
-  }, [activeStep, mode, onReveal]);
-
+    if (mode !== "tour" || !activeStep) return;
+    if (
+      (activeStep.needsProject && !hasProject) ||
+      (activeStep.needsClips && !hasClips)
+    ) {
+      setGeometry(null);
+      return;
+    }
+    if (activeStep.page !== page) {
+      setGeometry(null);
+      onNavigate(activeStep.page);
+      return;
+    }
+    onReveal?.(activeStep.target || "");
+  }, [activeStep, hasClips, hasProject, mode, onNavigate, onReveal, page]);
   useEffect(() => {
     const query = window.matchMedia("(prefers-reduced-motion: reduce)");
     const update = () => setReducedMotion(query.matches);
@@ -281,152 +355,101 @@ export default function GuidedTour({
     query.addEventListener?.("change", update);
     return () => query.removeEventListener?.("change", update);
   }, []);
-
   const updateGeometry = useCallback(() => {
-    if (mode !== "tour" || !activeStep || activeStep.page !== page) return;
+    if (
+      mode !== "tour" ||
+      !activeStep ||
+      activeStep.page !== page ||
+      (activeStep.needsProject && !hasProject) ||
+      (activeStep.needsClips && !hasClips)
+    ) {
+      setGeometry(null);
+      return;
+    }
     const target = findTarget(activeStep.target);
-    const width = Math.min(
-      POPOVER_WIDTH,
-      Math.max(260, window.innerWidth - 32),
-    );
     if (!target) {
       setGeometry(null);
       return;
     }
+    if (revealedTarget.current !== target) {
+      target.scrollIntoView({ block: "nearest", inline: "nearest" });
+      revealedTarget.current = target;
+    }
     const source = target.getBoundingClientRect();
-    const padding = 7;
-    const viewportLeft = 8;
-    const viewportTop = 8;
-    const viewportRight = Math.max(viewportLeft, window.innerWidth - 8);
-    const viewportBottom = Math.max(viewportTop, window.innerHeight - 8);
-    const clippedLeft = Math.max(
-      viewportLeft,
-      Math.min(source.left, viewportRight),
+    const width = Math.min(
+      POPOVER_WIDTH,
+      Math.max(270, window.innerWidth - 32),
     );
-    const clippedTop = Math.max(
-      viewportTop,
-      Math.min(source.top, viewportBottom),
-    );
-    const clippedRight = Math.max(
-      clippedLeft,
-      Math.min(source.right, viewportRight),
-    );
-    const clippedBottom = Math.max(
-      clippedTop,
-      Math.min(source.bottom, viewportBottom),
-    );
-    const rect = {
-      top: Math.max(viewportTop, clippedTop - padding),
-      left: Math.max(viewportLeft, clippedLeft - padding),
-      width: Math.min(
-        viewportRight - viewportLeft,
-        clippedRight - clippedLeft + padding * 2,
-      ),
-      height: Math.min(
-        viewportBottom - viewportTop,
-        clippedBottom - clippedTop + padding * 2,
-      ),
-    };
     const left = Math.min(
-      Math.max(16, clippedLeft + (clippedRight - clippedLeft) / 2 - width / 2),
+      Math.max(16, source.left + source.width / 2 - width / 2),
       Math.max(16, window.innerWidth - width - 16),
     );
-    const targetFillsViewport =
-      source.width >= window.innerWidth - 24 ||
-      source.height >= window.innerHeight - 24;
-    const belowTop = clippedBottom + 17;
-    const aboveTop = clippedTop - ESTIMATED_POPOVER_HEIGHT - 17;
-    const canFitBelow =
-      belowTop + ESTIMATED_POPOVER_HEIGHT <= window.innerHeight - 14;
-    const placement = targetFillsViewport
-      ? "center"
-      : canFitBelow || clippedTop < ESTIMATED_POPOVER_HEIGHT
+    const rect = {
+      top: Math.max(8, source.top - 7),
+      left: Math.max(8, source.left - 7),
+      width: Math.max(
+        0,
+        Math.min(window.innerWidth - 8, source.right + 7) -
+          Math.max(8, source.left - 7),
+      ),
+      height: Math.max(
+        0,
+        Math.min(window.innerHeight - 8, source.bottom + 7) -
+          Math.max(8, source.top - 7),
+      ),
+    };
+    const below = source.bottom + 17;
+    const above = source.top - ESTIMATED_HEIGHT - 17;
+    const placement =
+      below + ESTIMATED_HEIGHT < window.innerHeight - 12
         ? "below"
-        : "above";
-    const preferredTop =
-      placement === "center"
-        ? (window.innerHeight - ESTIMATED_POPOVER_HEIGHT) / 2
-        : placement === "below"
-          ? belowTop
-          : aboveTop;
+        : above > 12
+          ? "above"
+          : "center";
     setGeometry({
       rect,
       popover: {
-        top: Math.min(
-          Math.max(14, preferredTop),
-          Math.max(14, window.innerHeight - ESTIMATED_POPOVER_HEIGHT - 14),
-        ),
+        top:
+          placement === "below"
+            ? below
+            : placement === "above"
+              ? above
+              : Math.max(14, (window.innerHeight - ESTIMATED_HEIGHT) / 2),
         left,
       },
       placement,
     });
-  }, [activeStep, mode, page]);
-
+  }, [activeStep, hasClips, hasProject, mode, page]);
   useEffect(() => {
-    if (mode === "tour") setGeometry(null);
-  }, [mode, stepIndex]);
-
-  useEffect(() => {
-    if (mode !== "tour" || !activeStep) return;
+    if (mode !== "tour") return;
     let frame = 0;
-    let missingTimer: number | null = null;
-    let skipTimer: number | null = null;
     const update = () => {
-      window.cancelAnimationFrame(frame);
-      frame = window.requestAnimationFrame(() => {
-        frame = window.requestAnimationFrame(() => {
-          if (findTarget(activeStep.target)) {
-            if (missingTimer !== null) window.clearTimeout(missingTimer);
-            missingTimer = null;
-            updateGeometry();
-            return;
-          }
-          if (missingTimer === null) {
-            missingTimer = window.setTimeout(() => {
-              missingTimer = null;
-              updateGeometry();
-            }, 180);
-          }
-        });
-      });
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(updateGeometry);
     };
     update();
-    skipTimer = window.setTimeout(() => {
-      if (findTarget(activeStep.target)) return;
-      const nextIndex = steps.findIndex(
-        (candidate, index) => index > stepIndex && findTarget(candidate.target),
-      );
-      if (nextIndex >= 0) setStepIndex(nextIndex);
-      else closeTour("completed");
-    }, 900);
     window.addEventListener("resize", update);
     window.addEventListener("scroll", update, true);
     const observer = new MutationObserver(update);
-    observer.observe(document.body, { childList: true, subtree: true });
-    const retry = window.setTimeout(update, 160);
+    observer.observe(document.body, {
+      childList: true,
+      subtree: true,
+    });
     return () => {
-      window.cancelAnimationFrame(frame);
-      window.clearTimeout(retry);
-      if (skipTimer !== null) window.clearTimeout(skipTimer);
-      if (missingTimer !== null) window.clearTimeout(missingTimer);
+      cancelAnimationFrame(frame);
       window.removeEventListener("resize", update);
       window.removeEventListener("scroll", update, true);
       observer.disconnect();
     };
-  }, [activeStep, closeTour, mode, page, stepIndex, steps, updateGeometry]);
-
+  }, [mode, updateGeometry]);
   useEffect(() => {
-    if (mode === "welcome") {
+    if (mode === "welcome")
       window.setTimeout(() => welcomeRef.current?.focus(), 0);
-    } else if (mode === "tour") {
+    if (mode === "tour")
       window.setTimeout(() => popoverRef.current?.focus(), 0);
-    }
   }, [mode, stepIndex]);
-
   useEffect(() => {
     if (mode === "closed") return;
-    const getContainer = () =>
-      mode === "welcome" ? welcomeRef.current : popoverRef.current;
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
@@ -437,14 +460,13 @@ export default function GuidedTour({
       const container =
         mode === "welcome" ? welcomeRef.current : popoverRef.current;
       const items = focusable(container);
-      if (!container) return;
-      if (!items.length) {
+      if (!container || !items.length) {
         event.preventDefault();
-        container.focus();
+        container?.focus();
         return;
       }
-      const first = items[0];
-      const last = items[items.length - 1];
+      const first = items[0],
+        last = items[items.length - 1];
       if (!container.contains(document.activeElement)) {
         event.preventDefault();
         (event.shiftKey ? last : first).focus();
@@ -457,10 +479,10 @@ export default function GuidedTour({
       }
     };
     const onFocusIn = (event: FocusEvent) => {
-      const container = getContainer();
-      if (!container || container.contains(event.target as Node)) return;
-      const items = focusable(container);
-      (items[0] ?? container).focus();
+      const container =
+        mode === "welcome" ? welcomeRef.current : popoverRef.current;
+      if (container && !container.contains(event.target as Node))
+        (focusable(container)[0] ?? container).focus();
     };
     document.addEventListener("keydown", onKeyDown);
     document.addEventListener("focusin", onFocusIn);
@@ -470,11 +492,22 @@ export default function GuidedTour({
     };
   }, [closeTour, mode]);
 
-  if (mode === "closed") return null;
-
+  if (mode === "closed" || !activeStep) return null;
+  const next = () =>
+    stepIndex >= tourSteps.length - 1
+      ? closeTour("completed")
+      : setStepIndex((value) => value + 1);
+  const back = () => setStepIndex((value) => Math.max(0, value - 1));
+  const unavailable =
+    (!!activeStep.needsProject && !hasProject) ||
+    (!!activeStep.needsClips && !hasClips);
+  const targetMissing =
+    !!activeStep.target &&
+    !geometry &&
+    !unavailable &&
+    activeStep.page === page;
   const layerClass = `guided-tour-layer${reducedMotion ? " guided-tour-reduced-motion" : ""}`;
-
-  if (mode === "welcome") {
+  if (mode === "welcome")
     return (
       <div className={layerClass}>
         <div className="guided-tour-scrim" aria-hidden="true" />
@@ -489,14 +522,14 @@ export default function GuidedTour({
           <span className="guided-tour-mark" aria-hidden="true">
             ◌
           </span>
-          <p className="guided-tour-kicker">A quick orientation</p>
-          <h2 id="guided-tour-welcome-title">Welcome to Clipflow</h2>
+          <p className="guided-tour-kicker">A practical walkthrough</p>
+          <h2 id="guided-tour-welcome-title">From source to publish</h2>
           <p>
-            Turn long videos into a focused set of clips. This short tour shows
-            where to start, review, and export.
+            Follow the complete path through import, setup, editing, proof,
+            export, and explicit publishing.
           </p>
           <p className="guided-tour-meta">
-            About 60 seconds · Replay it from Settings
+            {tourSteps.length} steps · You can pause or skip at any time
           </p>
           <div className="guided-tour-actions guided-tour-actions-welcome">
             <button className="guided-tour-primary" onClick={() => startTour()}>
@@ -512,27 +545,9 @@ export default function GuidedTour({
         </section>
       </div>
     );
-  }
-
-  if (!activeStep) return null;
   const popoverStyle: CSSProperties = geometry
     ? { top: geometry.popover.top, left: geometry.popover.left }
     : { top: "50%", left: "50%", transform: "translate(-50%, -50%)" };
-
-  const next = () => {
-    if (stepIndex >= steps.length - 1) {
-      closeTour("completed");
-      return;
-    }
-    setStepIndex((index) => index + 1);
-  };
-
-  const back = () => setStepIndex((index) => Math.max(0, index - 1));
-
-  const onPopoverKeyDown = (event: ReactKeyboardEvent<HTMLElement>) => {
-    if (event.key === "Enter" && event.target === event.currentTarget) next();
-  };
-
   return (
     <div className={layerClass}>
       {geometry ? (
@@ -540,10 +555,10 @@ export default function GuidedTour({
           className="guided-tour-spotlight"
           aria-hidden="true"
           style={{
-            top: geometry.rect!.top,
-            left: geometry.rect!.left,
-            width: geometry.rect!.width,
-            height: geometry.rect!.height,
+            top: geometry.rect.top,
+            left: geometry.rect.left,
+            width: geometry.rect.width,
+            height: geometry.rect.height,
           }}
         />
       ) : (
@@ -551,18 +566,22 @@ export default function GuidedTour({
       )}
       <section
         ref={popoverRef}
-        className={`guided-tour-popover${geometry ? ` guided-tour-placement-${geometry.placement}` : ""}`}
+        className={`guided-tour-popover${geometry ? ` guided-tour-placement-${geometry.placement}` : " guided-tour-popover-fallback"}`}
         style={popoverStyle}
         role="dialog"
         aria-modal="true"
         aria-labelledby="guided-tour-step-title"
         aria-describedby="guided-tour-step-body"
         tabIndex={-1}
-        onKeyDown={onPopoverKeyDown}
+        onKeyDown={(event: ReactKeyboardEvent<HTMLElement>) => {
+          if (event.key === "Enter" && event.target === event.currentTarget)
+            next();
+        }}
       >
         <div className="guided-tour-popover-head">
+          <span className="guided-tour-chapter">{activeStep.chapter}</span>
           <span className="guided-tour-step-count">
-            {stepIndex + 1} of {steps.length}
+            {stepIndex + 1} of {tourSteps.length}
           </span>
           <button
             className="guided-tour-skip"
@@ -574,6 +593,18 @@ export default function GuidedTour({
         </div>
         <h2 id="guided-tour-step-title">{activeStep.title}</h2>
         <p id="guided-tour-step-body">{activeStep.body}</p>
+        {unavailable && (
+          <p className="guided-tour-meta">
+            {!hasProject
+              ? "Import or open a project to try this step. You can continue reading the walkthrough now."
+              : "Generate at least one clip to try this step in the editor."}
+          </p>
+        )}
+        {targetMissing && (
+          <p className="guided-tour-meta">
+            This option appears when it applies to your current project.
+          </p>
+        )}
         <div className="guided-tour-actions">
           <button
             className="guided-tour-secondary"
@@ -584,7 +615,7 @@ export default function GuidedTour({
             Back
           </button>
           <button className="guided-tour-primary" type="button" onClick={next}>
-            {stepIndex === steps.length - 1 ? "Done" : "Next"}
+            {stepIndex === tourSteps.length - 1 ? "Done" : "Next"}
           </button>
         </div>
       </section>

@@ -226,9 +226,17 @@ export function SourceImport({
         </div>
       </form>
       {inspectError && (
-        <p className="source-import-error" role="alert">
-          {inspectError}
-        </p>
+        <div className="source-import-error" role="alert">
+          <p>{inspectError}</p>
+          <button
+            className="source-import-submit"
+            type="button"
+            disabled={busy}
+            onClick={() => input.current?.click()}
+          >
+            <Upload size={16} /> Choose a video file instead
+          </button>
+        </div>
       )}
       {sourceInfo && inspectState === "success" && (
         <section
@@ -299,7 +307,8 @@ export function SourceImport({
         </p>
       )}
       <p className="source-import-footer">
-        Import the source, then configure moments, camera and captions before generating clips.
+        Import the source, then configure moments, camera and captions before
+        generating clips.
       </p>
     </div>
   );

@@ -1397,9 +1397,6 @@ body {
   color: var(--muted);
   margin: 14px 0;
 }
-.clip-filters {
-  flex-wrap: wrap;
-}
 .camera-controls [hidden] {
   display: none !important;
 }
@@ -1424,8 +1421,6 @@ body {
 @font-face {font-family: 'Noto Sans Arabic';src: url('/fonts/NotoSansArabic.ttf') format('truetype');font-weight: 100 900;font-display: swap;}
 .caption-font-control {display:grid;gap:8px;margin-bottom:18px;font-size:13px;}
 .caption-font-control select {width:100%;padding:10px;border:1px solid var(--line,#e2e6ed);border-radius:6px;background:white;}
-.clip-number {font-size:12px;white-space:nowrap;}
-.clip-thumbnail {gap:10px;}
 .clip-edit-controls label {display:grid;gap:8px;}
 .clip-edit-controls input {min-width:0;width:100%;padding:10px;border:1px solid #d5dcea;border-radius:6px;}
 .save-status.dirty {color:#946019;}
@@ -1438,3 +1433,9 @@ body {
 .clip-setup {flex:1 1 0;height:auto;}
 .clip-setup-layout {grid-template-rows:minmax(0,1fr);}
 .clip-setup-rail {min-height:0;overflow-y:auto;}
+@media (max-width: 840px) {
+  .clip-setup-layout {grid-template-rows:auto minmax(0,1fr);}
+  .clip-setup-rail {padding:10px 16px;}
+  .clip-setup-rail-intro {display:none;}
+  .clip-setup-steps {margin-top:0;}
+}

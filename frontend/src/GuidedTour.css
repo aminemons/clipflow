@@ -38,7 +38,7 @@
 .guided-tour-popover {
   position: fixed;
   z-index: 2;
-  width: min(340px, calc(100vw - 32px));
+  width: min(360px, calc(100vw - 32px));
   box-sizing: border-box;
   border: 1px solid #dce1ec;
   border-radius: 14px;
@@ -148,6 +148,12 @@
   font-weight: 700;
 }
 
+.guided-tour-chapter {
+  color: #697180;
+  font-size: 11px;
+  font-weight: 700;
+}
+
 .guided-tour-skip {
   padding: 3px 0;
   border: 0;
@@ -247,8 +253,17 @@
   }
 
   .guided-tour-popover {
+    width: min(360px, calc(100vw - 20px));
     max-height: calc(100vh - 28px);
     overflow: auto;
+  }
+
+  .guided-tour-actions {
+    justify-content: stretch;
+  }
+
+  .guided-tour-actions button {
+    flex: 1;
   }
 }
 

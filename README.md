@@ -1,154 +1,94 @@
 # Clipflow
 
-Clipflow is a local-first video editor for turning a long 16:9 video into editable 9:16 clips. Import a video file or a YouTube URL, let the editor suggest ranges, adjust clip boundaries, generate captions, inspect the rendered proof, and export one MP4 or a ZIP of selected clips. The workspace stores project data and media on the machine running the app.
+Clipflow is a local-first video editor for turning long recordings into short, captioned clips. It combines a React/Vite editor with a FastAPI worker, FFmpeg rendering, OpenCV framing, local Whisper transcription, and yt-dlp imports.
 
-The core path uses FFmpeg/FFprobe, OpenCV, and yt-dlp. Segmentation combines scene changes and silence when those signals are available. Reframing follows a detected focus point with smoothing and falls back safely when detection is unavailable. The result is a practical local baseline, not a claim of semantic “viral moment” detection.
+The normal flow is explicit: create or open a project, import a local file or inspect and download a YouTube source, choose a clip setup, review the suggested clips, then edit and export. Importing a source does not silently analyze it.
 
-## Workspace
+## What it does
 
-Importing a source never starts clipping. For YouTube, choose **Check video**, review its details, choose a download quality, then import. **Clip setup** guides you through moments (suggested, full source, or manual ranges), camera framing, captions and audio. The final **Generate clips** button runs one job that applies those choices to every new clip. Existing clips and exports are preserved. Open **Edit clips**, select a result, and adjust its timing, camera path, captions or audio independently. Camera paths are evaluated during proof/export rendering; render a proof to check the actual result.
+- Imports local video files and selected YouTube sources.
+- Creates clips from a full source, transcript moments, or manual ranges.
+- Provides local smart highlights, transcript editing, captions, speed, mute, fades, denoise, and crop/follow framing.
+- Renders MP4 clips with H.264 video, AAC audio, burned captions, and SRT downloads where selected.
+- Exports individual clips or a ZIP batch.
+- Offers optional provider integrations for hosted transcription, text ranking, vision framing, generative B-roll, and publishing. Each provider is opt-in from Settings and uses the account or credentials supplied by the owner.
 
-Under **Settings > Publishing**, add named YouTube, Instagram and TikTok accounts. Approve rendered exports, select individual destination accounts, then review the account list, privacy and captions before confirming a post. Configuring accounts does not publish anything. Providers require their OAuth credentials and platform-specific access; Instagram/TikTok also need a publicly reachable media URL.
+## Free path and optional providers
 
-- **Projects** opens the media library. Start a new project from a file or YouTube link, search names or tags, favorite frequently used sources, switch between grid and list, and rename or archive projects. Archive is reversible and keeps every source, edit, and export.
-- **Editor** separates Clipping, Layout, Captions, and Audio controls. The clip being edited is independent of the export checkboxes. Zoom the timeline, adjust boundaries, expand playback, review candidates, and export one clip or a selection.
-- **Exports** keeps finished versions and job activity together, with project filters, playable MP4 previews, downloads, cancellation, errors, and retry controls.
-- **Publish** lets you approve one or all rendered clips, choose destinations and post text, then confirm the exact files before sending. Editing or re-exporting invalidates approval. YouTube, Instagram and TikTok require their platform credentials and permissions; see [publishing setup](docs/PUBLISHING.md).
-- **Settings** contains optional provider keys, processing preferences, storage usage, preview cleanup, and help. A first-visit walkthrough highlights the actual controls; replay the whole tour here or from the sidebar.
+Local mode needs no account or paid API key. OpenCV framing, local highlight ranking, FFmpeg rendering, and on-device Whisper transcription run on the machine. The selected Whisper model is downloaded on first use and needs free disk space; Fast/tiny is an option on modest hardware; larger models take more time and memory.
 
-Layouts support 9:16, 1:1, 4:5, and 16:9 output with subject following, manual focus, fit, or a blurred background. The resolution selector reports the final dimensions. Source playback approximates framing; **Render proof** runs the same rendering pipeline used by export.
+Groq can provide hosted transcription or highlight ranking. OpenAI, Anthropic, Gemini, and Ollama options are available for the provider features implemented in Settings. Higgsfield is an optional generative B-roll integration. Publishing integrations need their own OAuth or provider setup. The supplied deployment has no paid provider configured, and no provider account or credits are included with Clipflow.
 
-Caption styles include reusable presets and custom styles saved in this browser. Apply a style to one clip or all clips, drag caption position, or enter X/Y coordinates. Import SRT/WebVTT files with **source-video timestamps** to replace the source transcript after confirmation; existing clip-specific corrections and manual overlays are retained. Subtitle import does not run speech recognition or require a key.
+## Run locally
 
-Reference research and implementation choices are recorded in [docs/NEW-REFERENCES.md](docs/NEW-REFERENCES.md) and [docs/WORKSPACE-REBUILD.md](docs/WORKSPACE-REBUILD.md). Reference code and their branding were not copied.
-
-Smart camera controls in **Editor → Layout** provide steady, smooth and dynamic movement, a tracking dead zone, zoom, and source-time keyframes for camera position. The renderer uses face detection, motion fallback and bounded movement. Review the rendered proof before exporting; source playback does not simulate the tracking path. See [camera behavior](docs/SMART-CAMERA.md).
-
-Optional OpenAI, Claude, Gemini, Groq and local Ollama models rank transcript highlight candidates. Local ranking requires no service. Configure editable model IDs and keys under **Settings → Processing & providers**; hosted choices send candidate transcript text to the selected provider and may incur provider charges. They do not change the local video rendering pipeline. Whisper remains the offline speech option; models download once and can then run without network access.
-
-The sidebar's **Download desktop** serves the Windows portable ZIP when a build is present. Extract it and run `Clipflow.exe`. Desktop build and offline requirements are in [docs/DESKTOP.md](docs/DESKTOP.md). Web deployment remains optional; this workspace runs locally.
-
-## Quick start on Windows
-
-Install these prerequisites first:
+Prerequisites:
 
 - Python 3.11 or newer
-- Node.js 20 or 22, including npm
-- FFmpeg with both `ffmpeg.exe` and `ffprobe.exe` on `PATH`
+- Node.js 20 or newer with `npm`
+- FFmpeg and FFprobe on `PATH`
+- Several GB of free disk space for dependencies, source media, renders, and Whisper models
 
-From the repository folder, double-click `start.cmd`. It runs `python launch.py`, creates the local `.venv` on first run, installs the backend requirements, builds the frontend, starts the API, and opens the browser. Keep the console window open while using Clipflow; press `Ctrl+C` to stop it.
-
-The equivalent command is:
+From the repository root, use PowerShell on Windows:
 
 ```powershell
 python launch.py
 ```
 
-Useful launcher options:
+On macOS or Linux, use the same launcher with the available Python command, usually:
 
-```powershell
-python launch.py --no-browser
-python launch.py --port 8767
-python launch.py --rebuild
+```sh
+python3 launch.py
 ```
 
-The first run needs internet access for Python and npm packages. Later runs reuse `.venv` and the built frontend. If startup reports a missing executable, verify `python --version`, `node --version`, `npm --version`, `ffmpeg -version`, and `ffprobe -version` in a new terminal.
+`start.cmd` is a Windows convenience wrapper for `python launch.py`.
 
-## Optional provider setup
+The launcher creates `.env` from `.env.example`, creates `.venv`, installs `backend/requirements.txt`, builds the frontend, and opens `http://127.0.0.1:8767`. Keep the terminal open while using the editor. Useful options are `python launch.py --no-browser`, `python launch.py --port 9000`, and `python launch.py --rebuild`.
 
-The editor needs no provider key for its free workflow. Open the gear button, choose your transcription and highlight providers, paste optional keys, and save. Settings take effect for the next job without restarting. Keys are stored only in the server's `.env`; the browser receives configured/not-configured flags. Blank key fields keep existing values, and Remove clears a saved key. Settings cannot change while a job is running.
-
-You can also edit `.env` beside `launch.py` and restart. The launcher creates it from `.env.example` on first use.
-
-- Local captions: leave `CLIPFLOW_TRANSCRIPTION_PROVIDER=local`. Choose Quick draft (tiny), Balanced (small), or Thorough (large-v3) in the Transcription controls. Missing models need sufficient cache space; recognition also needs available RAM and virtual memory. Clipflow reports resource failures without silently switching models.
-- Groq captions: set `CLIPFLOW_TRANSCRIPTION_PROVIDER=groq` and add `GROQ_API_KEY`.
-- Groq highlight selection: set `CLIPFLOW_HIGHLIGHT_PROVIDER=groq`; it uses the same `GROQ_API_KEY` and configurable `GROQ_HIGHLIGHT_MODEL`.
-- Higgsfield B-roll: add `HF_API_KEY` and `HF_API_SECRET`.
-
-For speech options, use Auto, Arabic, French, or English, and select Algerian Darija when the recording uses that dialect. Darija selects Arabic recognition and adds a context hint; it does not translate speech and does not guarantee dialect-level accuracy. You can provide a domain prompt of up to 500 characters. Set `CLIPFLOW_MODEL_CACHE` or `HF_HOME` to a persistent drive with room for the selected model. Fast local transcription remains the small-disk path.
-
-Keys stay server-side and are never needed in the browser. Provider requests can incur the account owner’s limits or credits; import, editing, tracking, manual captions, render proof, and export remain available without them.
-
-## Smart highlights and direct editing
-
-Choose **Full video** to segment the entire source, or **Smart highlights** to select a smaller set. Set an approximate duration, allowed variation, optional strict maximum, maximum count, and topic. For example, 30 seconds with 30% variation permits 21–39-second suggestions unless the strict maximum is lower. A short source remains usable as a shorter clip. Review each suggestion's reason, keep or discard it, and restore discarded suggestions from the library. Regeneration preserves existing edits and decisions.
-
-Free local highlights rank transcript passages using topic matches, speech coverage, and distinct wording. Speech analysis can automatically run local Whisper first. With speech analysis off, the selector samples structural scene/silence boundaries across the source; it does not understand pictured actions or emotions. Groq adds language-model selection among bounded transcript candidates. It sends transcript text to Groq; choosing Groq for transcription separately sends audio. Clip-scoped transcripts retain their source timestamps and are reused when the same source range and settings are requested.
-
-Only the suggested highlights are selected for export. The clip being edited can differ from the clips selected for export. Earlier clips and edits remain available; the source is never cut or deleted. Selection reasons explain what the free ranker observed, rather than predicting virality. Re-running identical ranges reuses clips.
-
-Drag captions or enter their X/Y percentage position. The same normalized position is used in rendered proofs and exports. Use the caption toggle to export without burned captions, or bottom/center placement presets. Expand the preview without resetting playback; Escape closes it. Playback controls remain below the image. Edit mode exposes the inspector; Review gives the library more room. Working on one clip leaves the export checkboxes unchanged.
-
-## Docker alternative
-
-With Docker Desktop running:
+Set `CLIPFLOW_DATA` and `CLIPFLOW_MODEL_CACHE` in `.env` when the default drive does not have enough space. Local mode is the default and does not require Supabase settings. A local Docker smoke environment is also available with:
 
 ```powershell
 docker compose up --build
 ```
 
-Open <http://127.0.0.1:8767>. The compose file binds the app to localhost and keeps application data in the named `clipflow-data` volume. Stop it with `Ctrl+C`; use `docker compose down` to remove the running stack. Keep the named volume if you want to retain projects and rendered files.
+It serves the editor at `http://127.0.0.1:8767` and keeps project data in the named `clipflow-data` volume.
 
-## Demo flow
+## Hosted deployment
 
-1. Open Clipflow and choose a local video, or paste a YouTube URL.
-2. Wait for analysis to finish and review the suggested clips.
-3. Select a clip, adjust its numeric start/end values, rename or duplicate it, and remove any unwanted range.
-4. Use the source preview and timeline to check the original footage. Generate captions with Transcription or enter a manual caption overlay; choose its style, color, and position.
-5. Select Render proof to inspect the actual tracked crop and burned captions inline. Export one selected clip as MP4, or select several clips for a ZIP. Each export job receives immutable download artifacts, so a later export does not replace an earlier result. The Exports panel also provides job progress, cancellation, and retry.
+The current hosted shape is an owner-only workspace:
 
-Local transcription uses the installed `faster-whisper` package and caches the selected model on first use. Balanced is the new-user default; Fast uses tiny, while Accurate uses large-v3. The first caption job may download model files and can be CPU-intensive. For hosted transcription, select Groq and add `GROQ_API_KEY` in Settings. Changes apply immediately. Manual `.env` edits require a restart.
+- Vercel serves the Vite frontend and rewrites relative `/api` and `/media` requests.
+- An Azure VM runs one persistent Dockerized FastAPI worker behind Caddy HTTPS.
+- Supabase Auth verifies the single configured owner. Supabase Storage is not used; projects, source media, renders, and settings remain on the worker's persistent disk.
 
-## Transcript, sound, and pace
+The hosted frontend is [clipflow-aminemons.vercel.app](https://clipflow-aminemons.vercel.app). Access is restricted to the configured owner account. Hosted deployment files and the required environment shape are in [docs/HOSTING.md](docs/HOSTING.md) and `deploy/azure/`. Never put Supabase service credentials or provider secrets in Vite variables or committed files.
 
-- Open **Transcript** in the output sidebar after transcription. Search for speech, use a timestamp to seek, correct text, and save. Corrections change subtitles without changing the recording.
-- Select a first and last transcript passage, then **Create clip from passage**. The new clip includes the entire interval between them and can be trimmed normally. Unsaved corrections are saved before creating it.
-- Open **Sound & pace** for the selected clip. Set speed from 0.5× to 2×, adjust volume from mute to 200%, enable basic background-noise reduction, and add audio fades of up to two seconds at both ends.
-- Render a proof to hear the processed audio. Playback speed changes video, audio, burned captions, and downloaded SRT together. Source timestamps and trim handles continue to refer to the original video.
-- These tools run locally without API keys. Noise reduction uses FFmpeg's spectral filter; it cannot reliably isolate speech from every background sound.
+This deployment is intentionally single-owner and single-worker. A worker restart signs out the in-memory hosted session and interrupts jobs that were running. It is not a multi-user or horizontally scaled service.
 
 ## Architecture
 
-The CI configuration is included as [`docs/github-actions.example.yml`](docs/github-actions.example.yml). To enable it, copy it to `.github/workflows/ci.yml` using a GitHub login with workflow permissions. The current publication credential could push source but could not create workflows. Local validation results are recorded in [`docs/VALIDATION.md`](docs/VALIDATION.md).
+The frontend is a Vite-built React application served by the FastAPI process in local mode and by Vercel in the hosted layout. FastAPI stores project metadata and job records as JSON under `CLIPFLOW_DATA`; media and exports are files in the same workspace. Writes use temporary files and replacement, with small backups for project records. An in-process executor runs one job at a time and mirrors job state to disk.
 
-The Python service owns ingestion, project persistence, analysis, tracking, rendering, ZIP creation, and job progress. The React/Vite frontend is built into `frontend/dist` and served by the local API. Long operations run in a small in-process thread pool and the browser polls `/api/jobs/{job_id}`.
+This keeps the local and owner-hosted paths simple, but it also means large uploads, renders, model downloads, and free disk space are bounded by the worker. A restart does not resume queued or running work. OpenCV tracking is heuristic and can need manual framing on graphic-heavy footage, while local Whisper accuracy depends on the audio and language. YouTube imports depend on the source being available to yt-dlp. YouTube may reject a cloud server with an anti-bot check even for a public video; upload your own video file if that happens.
 
-The main API contract includes health and capability status, file/YouTube/demo ingestion, project reads, clip add/update/delete, analysis, local or Groq transcription, preview/render proof, export, MP4 download, ZIP download, SRT download, and optional Higgsfield B-roll generation. Import, editing, tracking, captions, preview, and export remain usable without paid keys.
+## Desktop build
 
-Higgsfield B-roll is optional. Enable it and add `HF_API_KEY` and `HF_API_SECRET` in Settings; generation uses your Higgsfield account credits. The local editor does not require those keys.
+The optional Windows wrapper and portable ZIP instructions are in [docs/DESKTOP.md](docs/DESKTOP.md). The package keeps each user's projects, media, exports, and settings under `%LOCALAPPDATA%\\Clipflow`; it does not bundle `.env`, user data, models, or private fonts. WebView2 is required, with a browser fallback when its runtime is unavailable.
 
-## Known limits
+## Validation
 
-- Subject framing supports automatic face continuity or a left/right face preference, with a brightness-based saliency fallback when no face is found. It is not active-speaker or identity recognition; crossings, small faces, occlusion and fast cuts can still need manual framing correction.
-- The Haar face detector can mistake graphics for faces; this occurred in a real-media check. Use manual focus and a render proof for graphic-heavy material. Multiple-person tracking has not passed a representative accuracy benchmark.
-- The browser preview is an approximate editing view. Inspect the rendered MP4 to verify the final crop and encoding.
-- YouTube ingestion depends on yt-dlp and the source platform. Upstream changes, private videos, age gates, region restrictions, or network failures can stop import.
-- Jobs use an in-process thread worker. Stopping or restarting the app interrupts active work; retry the operation after restart.
-- Large videos need local disk space and CPU time. H.264 rendering is intentionally conservative for portability.
-- Local Whisper uses the selected cached model; first use may download model files and can be slow on CPU. A missing large model is reported as a storage/setup error rather than silently using tiny. Groq is an optional hosted alternative and sends audio to the provider.
-- User media and project data stay in the local workspace/container volume with local providers selected. Hosted transcription sends audio to Groq; hosted highlights sends transcript candidates and the requested topic. Higgsfield receives the generation prompt.
+The dated validation record in [docs/VALIDATION.md](docs/VALIDATION.md) separates automated checks, real workflow checks, and remaining deployment evidence. It records the exact test counts and the provider, model, browser, and hosted limitations that still matter.
 
-## Reproducible checks
-
-From `outputs/clipflow`:
+After the launcher has installed the app, run these checks in PowerShell:
 
 ```powershell
-python -m compileall backend launch.py
-python -m pip install -r backend/requirements.txt
+.venv\Scripts\python -m pip install pytest
+.venv\Scripts\python -m compileall backend launch.py
 Push-Location frontend
 npm ci
 npm run build
+npm test
 Pop-Location
+.venv\Scripts\python -m pytest -q
 ```
 
-For a running localhost app, verify `GET /api/health`, inspect capability status, create the built-in demo project, adjust a clip, generate the render proof, and export it. Install `pytest` and run `python -m pytest backend/tests tests -q` for the automated checks. Results and the live browser checks are recorded in [`docs/VALIDATION.md`](docs/VALIDATION.md). Paid providers were checked with mocks, without spending credits.
-
-## License and attribution
-
-Clipflow is distributed under the repository `LICENSE`. Third-party dependency and license notes are in [`docs/DEPENDENCIES.md`](docs/DEPENDENCIES.md). The competitor/product research is in [`docs/PRODUCT-RESEARCH.md`](docs/PRODUCT-RESEARCH.md); provider feature claims and prices can change.
-
-## Rebuild and hosted deployment
-
-Read the [architecture decisions](docs/ARCHITECTURE.md), [source repository comparison](docs/REFERENCE-RESEARCH.md), [requirements checklist](docs/REBUILD-CHECKLIST.md), and [hosted setup](docs/HOSTING.md). Vercel serves the frontend; a persistent container runs the API and media jobs. Optional Supabase authentication protects one private owner workspace. A Vercel frontend alone is not a working hosted video processor, and no backend URL defaults to a developer's localhost.
-
-Project metadata migrates additively. The first legacy save retains a `.json.v1.bak`; later saves retain one `.json.bak`. Back up the entire `CLIPFLOW_DATA` directory, including source videos, before moving machines. Provider settings contain secrets and should be copied privately, never committed or shared in a source archive.
+Use [docs/RELEASE-CHECKLIST.md](docs/RELEASE-CHECKLIST.md) for the remaining owner-hosted and distribution checks.

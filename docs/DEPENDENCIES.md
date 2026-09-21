@@ -22,4 +22,4 @@ The frontend includes a package lockfile and uses npm ci for repeatable installa
 
 Clipflow's optional Groq and Higgsfield adapters use HTTP APIs. Their accounts, credits, provider terms, and output licenses are separate from this dependency inventory. Core editing and local transcription do not require either account.
 
-Portable builds include Outfit under the SIL Open Font License; its notice is bundled at `frontend/public/fonts/OFL.txt`. The user's existing Neue Einstellung files remain available on their own machine at their request, but are excluded from Git and distributable archives because their redistribution rights have not been established. The CSS falls back to Outfit when those local files are absent.
+Portable builds include Outfit under the SIL Open Font License; its notice is bundled at `frontend/public/fonts/OFL.txt`. Private Neue Einstellung reference files are not tracked, requested by the frontend, or included in distributable archives. The released frontend uses the bundled Outfit, Anton, and Noto Sans Arabic fonts.

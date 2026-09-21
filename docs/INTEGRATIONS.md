@@ -47,11 +47,9 @@ The documented models are `whisper-large-v3` and `whisper-large-v3-turbo`. Uploa
 
 Official project: [SYSTRAN faster-whisper](https://github.com/SYSTRAN/faster-whisper). It runs Whisper through CTranslate2 and downloads a model on first use. The current build installs and requires it for the transcription route; model storage and CPU/GPU performance still vary, so the health endpoint should report a clear unavailable state when setup is incomplete. A local transcription adapter can remain entirely offline after model download; it should write segment timestamps into Clipflow’s existing transcript shape and preserve manual caption overrides. The project is MIT licensed, while each downloaded model may carry separate terms.
 
-## Mall of Travels typography reference
+## Typography reference
 
-The inspected source of truth is `C:\idh\mall-last\src\styles.scss` and `src/assets/fonts/neue-einstellung/`. The primary family is **Neue Einstellung**, with local WOFF2 files for weights 300, 400, 500, 600, 700, and 800. The CSS sets `--font-family: "Neue Einstellung", "Montserrat", sans-serif`; it uses Noto Sans Arabic as the RTL fallback. The source also imports Google-hosted Montserrat and Noto Sans Arabic.
-
-The source comment identifies Neue Einstellung as commercial and deliberately says the declarations resolve an already licensed local installation. No font license file was found beside the six WOFF2 assets. The six files were copied into Clipflow’s `frontend/public/fonts` under the user-authorized local reuse decision; retain this provenance note and do not redistribute them outside that authorized build without the asset owner’s license confirmation. The exact family is a visual reference, not an OSS dependency.
+The visual review used a separate commercial typography reference, but its private font files are not part of the tracked or distributed Clipflow build. The current frontend bundles the OFL-licensed Outfit, Anton, and Noto Sans Arabic fonts; hosted builds use Outfit and do not request the private reference family. Do not restore or redistribute unlicensed font binaries from another source tree.
 
 ## Design skill used for review
 

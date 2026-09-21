@@ -36,6 +36,8 @@ from .media import (
 )
 from .store import Store, utc_now
 from .source_probe import (
+    YouTubeSourceError,
+    classify_youtube_error,
     format_selector,
     probe_youtube,
     validate_youtube_url,
@@ -348,6 +350,9 @@ def job_view(job: dict) -> dict:
             "stale",
             "preview_revision",
             "warning",
+            "error_code",
+            "error_help_url",
+            "error_retryable",
         )
         if k in job
     }
@@ -465,6 +470,10 @@ def _run_job(item: dict, fn, *args):
         item["cancel_requested"] = False
         item["stage"] = "error"
         item["error"] = str(e)[:2000]
+        if isinstance(e, YouTubeSourceError):
+            item["error_code"] = e.code
+            item["error_help_url"] = e.help_url
+            item["error_retryable"] = e.retryable
         item["updated_at"] = utc_now()
         persist_job(item)
     finally:
@@ -860,7 +869,10 @@ def youtube_job(
             "js_runtimes": {"node": {}},
         }
         with yt_dlp.YoutubeDL(opts) as dl:
-            info = dl.extract_info(normalized_url, download=True)
+            try:
+                info = dl.extract_info(normalized_url, download=True)
+            except Exception as exc:
+                raise classify_youtube_error(exc, "download") from exc
             project["title"] = str(info.get("title") or "YouTube import")[:200]
         candidates = [
             p
@@ -872,6 +884,9 @@ def youtube_job(
         shutil.move(str(candidates[0]), str(out))
     except ImportError as e:
         raise RuntimeError("YouTube support requires yt-dlp") from e
+    except YouTubeSourceError:
+        _cleanup_youtube_downloads(project_id)
+        raise
     except BaseException:
         _cleanup_youtube_downloads(project_id)
         raise
@@ -1309,6 +1324,8 @@ def inspect_youtube_source(body: YouTubeInspectInput):
         return probe_youtube(body.url)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
+    except YouTubeSourceError as exc:
+        raise HTTPException(502, detail=exc.as_dict()) from exc
     except RuntimeError as exc:
         raise HTTPException(502, str(exc)) from exc
     except Exception as exc:
@@ -1753,11 +1770,11 @@ def patch_clip(project_id: str, clip_id: str, body: dict[str, Any]):
             )
         clip.update(changes)
         if "suggestion_status" in changes:
-            clip["reviewed"] = True
+            clip["reviewed"] = changes["suggestion_status"] != "pending"
             if changes["suggestion_status"] == "discarded":
                 clip["selected"] = False
-            elif changes["suggestion_status"] == "kept":
-                clip["selected"] = True
+            else:
+                clip["selected"] = changes["suggestion_status"] == "kept"
         validate_clip(clip, float(p["duration"]))
         if changes.keys() & {"start", "end"}:
             # The old scoped recognition stays in cache; it no longer covers this trim.

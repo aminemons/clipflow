@@ -7,6 +7,7 @@ never follows a URL outside the provider allowlist used by the import API.
 from __future__ import annotations
 
 import math
+import re
 from urllib.parse import urlparse
 from typing import Any
 
@@ -20,6 +21,92 @@ YOUTUBE_HOSTS = frozenset(
         "www.youtu.be",
     }
 )
+
+YTDLP_FAQ_URL = "https://github.com/yt-dlp/yt-dlp/wiki/FAQ#how-do-i-pass-cookies-to-yt-dlp"
+
+
+class YouTubeSourceError(RuntimeError):
+    """Safe, structured failure returned by either inspect or download."""
+
+    def __init__(
+        self,
+        code: str,
+        message: str,
+        *,
+        operation: str,
+        help_url: str | None = None,
+        retryable: bool = False,
+    ) -> None:
+        super().__init__(message)
+        self.code = code
+        self.operation = operation
+        self.help_url = help_url
+        self.retryable = retryable
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "code": self.code,
+            "message": str(self),
+            "operation": self.operation,
+            "help_url": self.help_url,
+            "retryable": self.retryable,
+        }
+
+
+def classify_youtube_error(exc: BaseException, operation: str = "inspect") -> YouTubeSourceError:
+    """Map noisy yt-dlp/provider errors to stable, safe UI-facing failures.
+
+    yt-dlp errors can contain request URLs, extractor internals, and account
+    details. The app only needs a diagnosis and a supported next step, so raw
+    provider text is intentionally not copied into the result.
+    """
+    text = str(exc).lower()
+    if re.search(r"sign in to confirm|not a bot|botguard|captcha|confirm you.re a bot", text):
+        return YouTubeSourceError(
+            "youtube_anti_bot",
+            "YouTube blocked this request with an anti-bot check. Open the video in YouTube and retry later, or use a local video file instead. Clipflow does not read browser cookies automatically.",
+            operation=operation,
+            help_url=YTDLP_FAQ_URL,
+            retryable=True,
+        )
+    if re.search(r"private video|sign in to view|login required|age.?restricted|members.?only", text):
+        return YouTubeSourceError(
+            "youtube_access_required",
+            "This YouTube video requires access that the importer cannot use. Choose a public video or import a local file.",
+            operation=operation,
+            help_url=YTDLP_FAQ_URL,
+        )
+    if re.search(r"video unavailable|video removed|not available|does not exist|copyright", text):
+        return YouTubeSourceError(
+            "youtube_unavailable",
+            "YouTube reports that this video is unavailable, removed, or restricted. Check the URL and choose another public video.",
+            operation=operation,
+        )
+    if re.search(r"timed out|timeout|temporary failure|connection (?:reset|Refused)|network", text):
+        return YouTubeSourceError(
+            "youtube_network",
+            "YouTube could not be reached right now. Check the connection and retry.",
+            operation=operation,
+            retryable=True,
+        )
+    if re.search(r"requested format|no suitable format|format not available", text):
+        return YouTubeSourceError(
+            "youtube_format",
+            "YouTube did not provide a compatible stream at the requested quality. Choose a lower quality and retry.",
+            operation=operation,
+        )
+    if re.search(r"javascript runtime|deno|challenge|extractor.*outdated|update yt-dlp", text):
+        return YouTubeSourceError(
+            "youtube_runtime",
+            "The YouTube importer needs its current yt-dlp runtime support. Update the app and retry.",
+            operation=operation,
+        )
+    return YouTubeSourceError(
+        "youtube_provider_error",
+        f"Could not {operation} the YouTube video. Check the URL and retry, or use a local video file.",
+        operation=operation,
+        retryable=True,
+    )
 def validate_youtube_url(url: str) -> str:
     """Validate and normalize a YouTube URL accepted by yt-dlp."""
     if not isinstance(url, str):
@@ -92,8 +179,13 @@ def probe_youtube(url: str) -> dict[str, Any]:
         "retries": 1,
         "js_runtimes": {"node": {}},
     }
-    with yt_dlp.YoutubeDL(opts) as downloader:
-        info = downloader.extract_info(normalized, download=False)
+    try:
+        with yt_dlp.YoutubeDL(opts) as downloader:
+            info = downloader.extract_info(normalized, download=False)
+    except YouTubeSourceError:
+        raise
+    except Exception as exc:
+        raise classify_youtube_error(exc, "inspect") from exc
     if not isinstance(info, dict):
         raise RuntimeError("YouTube returned no video metadata")
     # noplaylist should prevent this, but an extractor can still return an

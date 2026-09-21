@@ -22,8 +22,8 @@ Updated 2026-09-20. API/media verification and browser verification are distingu
 | Consistency/storage | Snapshot exports, stale preview rejection, atomic metadata/backups, space preflight/failed-output cleanup | No distributed queue or shared multi-tenant store |
 | Providers/settings | Server-side masked/removable Groq/Higgsfield credentials; adapters mock-tested | No successful live provider requests |
 | Research | Three repositories traced through source; competitors and license decisions linked | No unlicensed code/assets copied |
-| Hosted authorization | Fail-closed owner-only Supabase adapter; origin/session/media guards pass mocked tests | Live Supabase owner not configured; single private workspace only |
-| Deployment | Vercel/Supabase dashboard access confirmed; worker Docker/proxy configuration prepared | Blocked: persistent HTTPS video worker host; no working cloud URL claimed |
+| Hosted authorization | Fail-closed owner-only Supabase adapter; live owner login, authenticated projects, anonymous rejection, and foreign-origin rejection checked | Single private workspace only; restart signs out the in-memory session |
+| Deployment | Vercel frontend and Azure Docker worker are live behind HTTPS Caddy; health and proxy/auth boundaries checked | Large multipart upload through Vercel, restart recovery, and long hosted render remain operational checks |
 | Source/handover | Private [GitHub repository](https://github.com/aminemons/clipflow), setup, env example, architecture, research, validation and demo instructions | Recruiter needs repository access; CI example is not enabled |
 
 ## Validation and recovery

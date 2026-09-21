@@ -4,11 +4,18 @@ import time
 import types
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from backend import app as api
 from backend.media import make_demo
-from backend.source_probe import format_selector, probe_youtube
+from backend.source_probe import (
+    YTDLP_FAQ_URL,
+    YouTubeSourceError,
+    classify_youtube_error,
+    format_selector,
+    probe_youtube,
+)
 from backend.store import Store
 
 
@@ -76,6 +83,44 @@ def test_probe_keeps_low_resolution_actual_height(monkeypatch):
 
     monkeypatch.setitem(sys.modules, "yt_dlp", types.SimpleNamespace(YoutubeDL=FakeYoutubeDL))
     assert probe_youtube("https://youtu.be/low")['qualities'] == [144]
+
+
+def test_probe_classifies_antibot_error_without_leaking_provider_text(monkeypatch):
+    class FakeYoutubeDL:
+        def __init__(self, _options):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def extract_info(self, _url, download=False):
+            raise RuntimeError("[youtube] Sign in to confirm you're not a bot: https://secret.example/token")
+
+    monkeypatch.setitem(sys.modules, "yt_dlp", types.SimpleNamespace(YoutubeDL=FakeYoutubeDL))
+    try:
+        probe_youtube("https://youtu.be/blocked")
+    except YouTubeSourceError as exc:
+        assert exc.code == "youtube_anti_bot"
+        assert exc.help_url == YTDLP_FAQ_URL
+        assert "secret.example" not in str(exc)
+        assert exc.as_dict()["operation"] == "inspect"
+    else:
+        raise AssertionError("anti-bot error was not classified")
+
+
+def test_classify_download_error_has_stable_actionable_shape():
+    error = classify_youtube_error(
+        RuntimeError("ERROR: Sign in to confirm you're not a bot"), "download"
+    )
+    assert error.code == "youtube_anti_bot"
+    assert error.operation == "download"
+    assert error.retryable is True
+    assert set(error.as_dict()) == {
+        "code", "message", "operation", "help_url", "retryable"
+    }
 
 
 def test_upload_job_only_prepares_source_and_keeps_clips_empty(monkeypatch, tmp_path: Path):
@@ -189,6 +234,39 @@ def test_youtube_job_downloads_selected_low_height_without_analysis(monkeypatch,
         api.store, api.DATA, api.jobs = old_store, old_data, old_jobs
 
 
+def test_youtube_job_classifies_antibot_download_failure(monkeypatch, tmp_path: Path):
+    old_store, old_data, old_jobs = api.store, api.DATA, api.jobs
+    try:
+        api.store = Store(tmp_path)
+        api.DATA = tmp_path
+        api.jobs = {}
+        pid = api.store.create_id()
+        (api.store.files / f"{pid}.mp4").touch()
+        api.store.save({"id": pid, "title": "YouTube import", "clips": []})
+
+        class FakeYoutubeDL:
+            def __init__(self, _options):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def extract_info(self, _url, download=True):
+                raise RuntimeError("Sign in to confirm you're not a bot")
+
+        monkeypatch.setitem(sys.modules, "yt_dlp", types.SimpleNamespace(YoutubeDL=FakeYoutubeDL))
+        with pytest.raises(YouTubeSourceError) as raised:
+            api.youtube_job({"id": "youtube-job", "project_id": pid}, pid, "https://youtu.be/abc", 30, 360)
+        assert raised.value.code == "youtube_anti_bot"
+        assert raised.value.operation == "download"
+        assert list(api.store.files.glob(f"{pid}.download.*")) == []
+    finally:
+        api.store, api.DATA, api.jobs = old_store, old_data, old_jobs
+
+
 def test_source_inspect_rejects_host_and_reports_probe_failure(monkeypatch):
     client = TestClient(api.app)
     invalid = client.post("/api/sources/youtube/inspect", json={"url": "https://example.com/video"})
@@ -197,3 +275,31 @@ def test_source_inspect_rejects_host_and_reports_probe_failure(monkeypatch):
     failed = client.post("/api/sources/youtube/inspect", json={"url": "https://youtu.be/abc"})
     assert failed.status_code == 502
     assert "provider unavailable" in failed.json()["detail"]
+
+
+def test_source_inspect_returns_structured_classified_failure(monkeypatch):
+    client = TestClient(api.app)
+    monkeypatch.setattr(
+        api,
+        "probe_youtube",
+        lambda _url: (_ for _ in ()).throw(
+            YouTubeSourceError(
+                "youtube_anti_bot",
+                "YouTube blocked this request.",
+                operation="inspect",
+                help_url=YTDLP_FAQ_URL,
+                retryable=True,
+            )
+        ),
+    )
+    response = client.post(
+        "/api/sources/youtube/inspect", json={"url": "https://youtu.be/abc"}
+    )
+    assert response.status_code == 502
+    assert response.json()["detail"] == {
+        "code": "youtube_anti_bot",
+        "message": "YouTube blocked this request.",
+        "operation": "inspect",
+        "help_url": YTDLP_FAQ_URL,
+        "retryable": True,
+    }
