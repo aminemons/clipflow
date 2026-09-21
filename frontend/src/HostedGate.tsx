@@ -7,6 +7,7 @@ import {
   useMemo,
   useState,
 } from "react";
+import { useDialogFocus } from "./useDialogFocus";
 import "./HostedGate.css";
 
 type HostedStatus = "checking" | "signed-out" | "signed-in" | "unavailable";
@@ -23,6 +24,7 @@ type HostedAuthContextValue = {
 const HostedAuthContext = createContext<HostedAuthContextValue | null>(null);
 
 const forcedHostedMode = import.meta.env.VITE_CLIPFLOW_MODE === "hosted";
+const AUTH_EXPIRED_EVENT = "clipflow-auth-expired";
 
 async function readSession(): Promise<{
   mode: "local" | "hosted";
@@ -33,6 +35,8 @@ async function readSession(): Promise<{
     credentials: "same-origin",
     cache: "no-store",
   });
+  if (response.status === 401)
+    return { mode: "hosted", authenticated: false };
   // A missing probe is the expected signal from an unmodified local worker.
   if (response.status === 404 && !forcedHostedMode)
     return { mode: "local", authenticated: false };
@@ -63,8 +67,10 @@ export function useHostedAuth(): HostedAuthContextValue {
 
 function LoginPanel({
   onSignedIn,
+  expired = false,
 }: {
   onSignedIn: (userId: string | null) => void;
+  expired?: boolean;
 }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -114,7 +120,11 @@ function LoginPanel({
       >
         <span className="hosted-eyebrow">Private workspace</span>
         <h1 id="hosted-login-title">Sign in to Clipflow</h1>
-        <p>Use the owner account to open this hosted workspace.</p>
+        <p>
+          {expired
+            ? "Your session expired. Sign in again to continue; your open edits remain on this page."
+            : "Use the owner account to open this hosted workspace."}
+        </p>
         <form onSubmit={submit}>
           <label>
             Email
@@ -157,6 +167,8 @@ export function HostedGate({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<HostedStatus>("checking");
   const [userId, setUserId] = useState<string | null>(null);
   const [logoutError, setLogoutError] = useState("");
+  const [authExpired, setAuthExpired] = useState(false);
+  const expiredDialogRef = useDialogFocus<HTMLDivElement>(authExpired);
 
   useEffect(() => {
     let active = true;
@@ -177,6 +189,51 @@ export function HostedGate({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  useEffect(() => {
+    const expired = () => {
+      if (mode !== "hosted" || status !== "signed-in") return;
+      setAuthExpired(true);
+      setUserId(null);
+      setStatus("signed-out");
+    };
+    window.addEventListener(AUTH_EXPIRED_EVENT, expired);
+    return () => window.removeEventListener(AUTH_EXPIRED_EVENT, expired);
+  }, [mode, status]);
+
+  useEffect(() => {
+    if (mode !== "hosted" || status !== "signed-in") return;
+    let active = true;
+    let checking = false;
+    const revalidate = () => {
+      if (!active || checking || document.visibilityState === "hidden") return;
+      checking = true;
+      readSession()
+        .then((session) => {
+          if (!active) return;
+          if (!session.authenticated) {
+            setAuthExpired(true);
+            setUserId(null);
+            setStatus("signed-out");
+          } else {
+            setUserId(session.user_id ?? null);
+          }
+        })
+        .catch(() => {
+          // Keep the mounted workspace on transient network failures.
+        })
+        .finally(() => {
+          if (active) checking = false;
+        });
+    };
+    window.addEventListener("focus", revalidate);
+    document.addEventListener("visibilitychange", revalidate);
+    return () => {
+      active = false;
+      window.removeEventListener("focus", revalidate);
+      document.removeEventListener("visibilitychange", revalidate);
+    };
+  }, [mode, status]);
+
   const logout = async () => {
     if (mode !== "hosted") return;
     setLogoutError("");
@@ -188,6 +245,7 @@ export function HostedGate({ children }: { children: ReactNode }) {
         body: "{}",
       });
       if (!response.ok) throw new Error("logout failed");
+      setAuthExpired(false);
       setUserId(null);
       setStatus("signed-out");
     } catch {
@@ -217,6 +275,35 @@ export function HostedGate({ children }: { children: ReactNode }) {
     );
   }
   if (status === "signed-out") {
+    if (authExpired) {
+      return (
+        <HostedAuthContext.Provider value={value}>
+          <div className="hosted-app-shell">
+            <div className="hosted-session-bar">
+              <span>Session expired</span>
+            </div>
+            {children}
+            <div
+              className="hosted-gate hosted-gate-login"
+              style={{ position: "fixed", inset: 0, zIndex: 2000 }}
+              ref={expiredDialogRef}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="hosted-login-title"
+            >
+              <LoginPanel
+                expired
+                onSignedIn={(nextUserId) => {
+                  setAuthExpired(false);
+                  setUserId(nextUserId);
+                  setStatus("signed-in");
+                }}
+              />
+            </div>
+          </div>
+        </HostedAuthContext.Provider>
+      );
+    }
     return (
       <HostedAuthContext.Provider value={value}>
         <LoginPanel

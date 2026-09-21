@@ -5,8 +5,8 @@ This record distinguishes automated evidence from manual checks and from work th
 ## Automated evidence
 
 - Backend suite: **157 passed, 2 warnings in 47.89s** in a fresh temporary `CLIPFLOW_DATA` directory with local transcription mode. The warnings were Starlette/httpx test-harness deprecations.
-- Frontend TypeScript/Vite production build passed with 1,617 modules.
-- Frontend `npm test` passed the subtitle import checks and six clip-library regression tests.
+- Frontend TypeScript/Vite production build passed.
+- Frontend `npm test` passed the subtitle import checks and seven clip-library regression tests, including old suggestions with conflicting review fields.
 - The integration suite under `tests/` passed separately: **8 passed**, covering real video import, clip edits, framing, and exports.
 - Vite was updated to 6.4.3 with React plugin 4.7.0. The production build, frontend tests, and `npm audit --audit-level=moderate` passed; the audit reported zero known vulnerabilities.
 - Python bytecode compilation passed for `backend` and `launch.py`.
@@ -24,13 +24,13 @@ This record distinguishes automated evidence from manual checks and from work th
 - Responsive checks at 880x560 and 400x680 exposed a collapsed right-panel layout issue that was fixed during the session. The final mobile setup check confirmed a readable step rail, scrolling content, and a reachable Generate button at the bottom of the viewport, without horizontal page overflow.
 - Individual MP4 export completed and its browser download event was received. The final browser console check reported no errors.
 - Duplicating a clip after rendering its proof returned the new clip to the source preview; it did not reuse the original clip's proof URL.
-- The browser file chooser was blocked by the browser's file-URL access setting. A 12 MB multipart upload through the API passed; browser upload itself is not claimed as verified.
+- The browser file chooser initially required Chrome's extension file-URL permission. After the owner enabled it, the 12 MB browser upload completed locally and opened source setup with zero clips, as intended. The separate multipart API upload also passed.
 
 ## Hosted deployment evidence
 
 - The current hosted layout is Vercel frontend → HTTPS Caddy proxy → one Azure Docker worker, with Supabase Auth for one owner and persistent worker disk for project data and media. Supabase Storage is not part of the data path.
 - The configured frontend is [clipflow-aminemons.vercel.app](https://clipflow-aminemons.vercel.app). The worker health route returned HTTP 200 through the HTTPS proxy; unauthenticated session and projects probes returned the expected protected responses. This verifies routing and protection boundaries, not a signed-in owner workflow.
-- On 2026-09-21, revision `b476878` deployed successfully through Vercel and the Azure worker was rebuilt. The proxied health endpoint returned `{"ready": true}`. A real YouTube metadata probe on the worker returned the new `youtube_anti_bot` diagnosis; the provider still blocks that cloud request. A fresh owner sign-in is needed after the worker restart to finish authenticated browser checks.
+- On 2026-09-21, revision `7cecc38` deployed successfully through Vercel and the Azure worker was rebuilt. The proxied health endpoint returned `{"ready": true}`. A real YouTube metadata probe on the worker returned the new `youtube_anti_bot` diagnosis; the provider still blocks that cloud request. A fresh owner sign-in is needed after the worker restart to finish authenticated browser checks.
 - The hosted deployment uses one in-process worker. Restart behavior, queued-job recovery, persistent volume recovery, and large multipart uploads remain operational checks for the live VM.
 - Optional live provider calls were not performed. Mock provider contracts and missing-credential/error handling are covered by tests. No paid provider account or credits are part of this deployment.
 - No live paid-provider calls or social publishing actions were performed during the 2026-09-21 checks.

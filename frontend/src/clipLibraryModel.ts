@@ -15,6 +15,14 @@ export function isDiscarded(clip: Clip) {
   return clip.suggestion_status === "discarded";
 }
 
+/** Legacy projects can have a stale reviewed flag beside a pending suggestion. */
+export function needsReview(clip: Clip) {
+  return (
+    isSuggestion(clip) &&
+    (!clip.suggestion_status || clip.suggestion_status === "pending")
+  );
+}
+
 export function matchesLibraryFilter(
   clip: Clip,
   filter: LibraryFilter,
@@ -24,12 +32,8 @@ export function matchesLibraryFilter(
     return false;
   if (filter === "discarded") return isDiscarded(clip);
   if (isDiscarded(clip)) return false;
-  if (filter === "pending")
-    return (
-      isSuggestion(clip) &&
-      (!clip.suggestion_status || clip.suggestion_status === "pending")
-    );
-  if (filter === "kept") return Boolean(clip.reviewed);
+  if (filter === "pending") return needsReview(clip);
+  if (filter === "kept") return Boolean(clip.reviewed) && !needsReview(clip);
   if (filter === "exported") return clip.status === "exported";
   return true;
 }

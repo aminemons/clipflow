@@ -6,6 +6,7 @@ import {
   isDiscarded,
   isSuggestion,
   matchesLibraryFilter,
+  needsReview,
   type LibraryFilter,
   type LibraryPatch,
 } from "./clipLibraryModel";
@@ -128,9 +129,7 @@ export default function ClipLibrary(props: Props) {
           const active = clip.id === activeId;
           const discarded = isDiscarded(clip);
           const suggested = isSuggestion(clip);
-          const needsReview =
-            suggested &&
-            (!clip.suggestion_status || clip.suggestion_status === "pending");
+          const clipNeedsReview = needsReview(clip);
           return (
             <article
               className={`library-clip${active ? " is-editing" : ""}`}
@@ -159,7 +158,7 @@ export default function ClipLibrary(props: Props) {
                         ? "Exported"
                         : clip.reviewed
                           ? "Reviewed"
-                          : needsReview
+                          : clipNeedsReview
                             ? "To review"
                             : "Draft"}
                 </span>
@@ -199,7 +198,7 @@ export default function ClipLibrary(props: Props) {
                     >
                       {active ? "Edit settings" : "Edit clip"}
                     </button>
-                    {needsReview ? (
+                    {clipNeedsReview ? (
                       <button
                         disabled={saving}
                         onClick={() =>

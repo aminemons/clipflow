@@ -21,7 +21,8 @@ new Function("require", "module", "exports", compiled)(
   module,
   module.exports,
 );
-const { exportClipIds, libraryPatch, matchesLibraryFilter } = module.exports;
+const { exportClipIds, libraryPatch, matchesLibraryFilter, needsReview } =
+  module.exports;
 
 const suggested = {
   id: "one",
@@ -58,6 +59,13 @@ test("Keep selects the clip for export and completes suggestion review", () => {
   assert.deepEqual(exportClipIds([clip]), ["one"]);
   assert.equal(matchesLibraryFilter(clip, "pending", ""), false);
   assert.equal(matchesLibraryFilter(clip, "kept", ""), true);
+});
+
+test("legacy pending suggestions do not count as reviewed when reviewed is stale", () => {
+  const legacy = { ...suggested, reviewed: true };
+  assert.equal(needsReview(legacy), true);
+  assert.equal(matchesLibraryFilter(legacy, "pending", ""), true);
+  assert.equal(matchesLibraryFilter(legacy, "kept", ""), false);
 });
 
 test("stale selected flags on discarded clips cannot leak into a bulk export", () => {

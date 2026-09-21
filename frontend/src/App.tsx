@@ -57,6 +57,7 @@ import type {
 } from "./editorTypes";
 
 const API = "/api";
+const AUTH_EXPIRED_EVENT = "clipflow-auth-expired";
 const DEFAULT_CLIP: Omit<Clip, "id"> = {
   title: "Untitled clip",
   start: 0,
@@ -89,6 +90,9 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
       ...init?.headers,
     },
   });
+  if (response.status === 401) {
+    window.dispatchEvent(new Event(AUTH_EXPIRED_EVENT));
+  }
   if (!response.ok) {
     const message = await response.text();
     try {
@@ -1176,6 +1180,9 @@ export default function App() {
       const res = await fetch(
         `${API}/projects/${project.id}/clips/${id}/captions`,
       );
+      if (res.status === 401) {
+        window.dispatchEvent(new Event(AUTH_EXPIRED_EVENT));
+      }
       if (!res.ok)
         throw new Error((await res.text()) || "Captions are not ready yet.");
       const blob = await res.blob();
