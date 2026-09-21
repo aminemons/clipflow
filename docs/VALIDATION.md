@@ -1,15 +1,20 @@
 # Validation record
 
-This record distinguishes automated evidence from manual checks and from work that still needs a real provider or hosted account. It covers checks recorded on Windows between 2026-09-19 and 2026-09-21. The commands and browser sessions were run against the source tree available at those dates; rebuild after source changes.
+This record separates automated evidence, manual checks, and work that still
+needs a real provider or Windows host. Historical browser checks are included
+for context; the latest source evidence is dated 2026-09-21.
 
 ## Automated evidence
 
-- Backend suite: **157 passed, 2 warnings in 47.89s** in a fresh temporary `CLIPFLOW_DATA` directory with local transcription mode. The warnings were Starlette/httpx test-harness deprecations.
-- Frontend TypeScript/Vite production build passed.
+- Complete Python set: **180 passed** across three partitions on 2026-09-21. This included backend, desktop, and real-media integration tests. The only warnings were Starlette/httpx test-harness deprecations.
+- Python bytecode compilation passed for `backend`, `desktop`, and `launch.py`.
+- Frontend TypeScript/Vite production build passed with 1,614 transformed modules.
 - Frontend `npm test` passed the subtitle import checks and seven clip-library regression tests, including old suggestions with conflicting review fields.
-- The integration suite under `tests/` passed separately: **8 passed**, covering real video import, clip edits, framing, and exports.
+- The integration suite under `tests/` is part of the full count and covers real video import, clip edits, framing, and exports.
+- Desktop release tests now reject bundles that omit the pinned Small speech model, faster-whisper's Silero VAD model, ONNX Runtime, curl-cffi, the frontend, Node.js, FFmpeg, or FFprobe.
+- YouTube tests cover metadata inspection, bounded browser-compatible retry, structured anti-bot failures, selected-quality download, cleanup, and job error contracts without making external requests.
+- `.github/workflows/ci.yml` runs the Python suite, frontend tests, and production build on pushes and pull requests.
 - Vite was updated to 6.4.3 with React plugin 4.7.0. The production build, frontend tests, and `npm audit --audit-level=moderate` passed; the audit reported zero known vulnerabilities.
-- Python bytecode compilation passed for `backend` and `launch.py`.
 - Backend tests cover imports and uploads, path safety, media ranges, full-source segmentation, transcript edits and SRT, caption rendering, framing, audio edits, export invalidation, batch ZIPs, job deduplication/cancellation, temporary-file cleanup, provider contracts, and hosted-auth boundaries.
 
 ## Local workflow evidence
@@ -30,17 +35,17 @@ This record distinguishes automated evidence from manual checks and from work th
 
 - The current hosted layout is Vercel frontend → HTTPS Caddy proxy → one Azure Docker worker, with Supabase Auth for one owner and persistent worker disk for project data and media. Supabase Storage is not part of the data path.
 - The configured frontend is [clipflow-aminemons.vercel.app](https://clipflow-aminemons.vercel.app). The worker health route returned HTTP 200 through the HTTPS proxy; unauthenticated session and projects probes returned the expected protected responses. This verifies routing and protection boundaries, not a signed-in owner workflow.
-- On 2026-09-21, revision `7cecc38` deployed successfully through Vercel and the Azure worker was rebuilt. The proxied health endpoint returned `{"ready": true}`. A real YouTube metadata probe on the worker returned the new `youtube_anti_bot` diagnosis; the provider still blocks that cloud request. A fresh owner sign-in is needed after the worker restart to finish authenticated browser checks.
+- On 2026-09-21, revision `7cecc38` deployed successfully through Vercel and the Azure worker was rebuilt. The proxied health endpoint returned `{"ready": true}`. A real YouTube metadata probe on the worker returned `youtube_anti_bot`.
+- The current source adds one browser-compatible yt-dlp retry before returning that diagnosis. It has automated coverage but has not yet been deployed or tested against the live worker IP.
 - The hosted deployment uses one in-process worker. Restart behavior, queued-job recovery, persistent volume recovery, and large multipart uploads remain operational checks for the live VM.
 - Optional live provider calls were not performed. Mock provider contracts and missing-credential/error handling are covered by tests. No paid provider account or credits are part of this deployment.
 
-## Windows package, 2026-09-21
+## Windows package
 
-- The rebuilt portable executable passed `Clipflow.exe --self-test` and a fresh-data demo-to-MP4 export check. The downloaded four-second clip was 85,482 bytes.
-- The ZIP contains 363 entries and passed its CRC integrity check. It includes FFmpeg, FFprobe, Node.js 22.14.0, the YouTube solver support files, and the matching license notices.
-- The archive was checked for credentials, user projects/media, model caches, and private fonts; none were included.
-- ZIP SHA-256: `7e3deadb99f5dda69702d9d1d977ae2afa539b66b017674e2ae6e248f66e49de`.
-- No live paid-provider calls or social publishing actions were performed during the 2026-09-21 checks.
+- The previous 2026-09-21 archive passed its self-test and demo-to-MP4 check, but it is superseded because it omitted faster-whisper's Silero VAD file. It must not be shared.
+- The updated build collects faster-whisper, ONNX Runtime, curl-cffi, and yt-dlp support files and includes a pinned multilingual Small model. `desktop/verify_bundle.py` runs before compression and stops an incomplete release.
+- A new Windows ZIP, packaged self-test, automatic-caption run, archive scan, and SHA-256 are still required on Windows. `scripts/release-windows.ps1` runs the source checks, builds the package, runs the executable self-test, and prints the new hash.
+- No live paid-provider calls or social publishing actions were performed during these checks.
 
 ## Known limits and open checks
 
@@ -48,4 +53,5 @@ This record distinguishes automated evidence from manual checks and from work th
 - Project records, source files, exports, and Whisper models need persistent disk and free space under `CLIPFLOW_DATA`/`CLIPFLOW_MODEL_CACHE`. The current JSON store and one executor are not a multi-tenant or horizontal-scaling design.
 - Local mode has no account requirement. Hosted mode requires the exact HTTPS public origin, Supabase URL/publishable key, and configured owner ID; secrets must stay on the worker.
 - Local Whisper quality varies with audio, language, and model size. Visual tracking is heuristic. Free highlight ranking uses transcript and structural signals rather than semantic visual understanding.
-- Fresh owner login, upload through the Vercel rewrite, a long hosted render, worker restart with persistent data, and optional provider calls should be checked against the live account before describing the hosted path as fully signed off.
+- Deploy the current source, then check owner login, upload through the Vercel rewrite, YouTube retry, a long hosted render, worker restart with persistent data, and download through the live account.
+- Build and exercise the new Windows archive before sending it to the recruiter.

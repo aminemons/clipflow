@@ -8,6 +8,8 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from .speech_assets import BUNDLED_MODEL_FILES, BUNDLED_MODEL_NAME
+
 ROOT = Path(__file__).resolve().parent.parent
 load_dotenv(ROOT / ".env", override=False)
 # Containers persist UI preferences beside their media volume. Explicit UI
@@ -29,8 +31,19 @@ def public_capabilities() -> dict:
         if provider == "groq"
         else local if provider == "local" else False
     )
+    bundled_root = value("CLIPFLOW_BUNDLED_MODEL_DIR")
+    bundled_model = Path(bundled_root) / BUNDLED_MODEL_NAME if bundled_root else None
+    bundled_model_ready = bool(
+        bundled_model
+        and all((bundled_model / name).is_file() for name in BUNDLED_MODEL_FILES)
+    )
+    local_message = (
+        "Audio is transcribed on this computer. The multilingual speech model is included."
+        if bundled_model_ready
+        else "Audio is transcribed on this computer. The speech model downloads once."
+    )
     message = (
-        "Audio is transcribed on this computer. The speech model downloads once."
+        local_message
         if provider == "local" and local
         else (
             "Install backend/requirements.txt to enable on-device transcription."

@@ -200,6 +200,40 @@
 }
 .source-import-error {
   color: #ac3f45;
+  padding: 12px;
+  border: 1px solid #e9b8ba;
+  border-radius: 8px;
+  background: #fff6f6;
+}
+.source-import-error h3,
+.source-import-error p {
+  margin: 0;
+}
+.source-import-error h3 {
+  color: #852f35;
+  font-size: 13px;
+}
+.source-import-error p {
+  margin-top: 5px;
+}
+.source-import-error small {
+  display: block;
+  margin-top: 9px;
+  color: #755c60;
+}
+.source-error-actions {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  margin-top: 10px;
+}
+.source-error-actions .source-import-submit {
+  margin-top: 0;
+}
+.source-error-actions .source-import-cancel {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 .source-import-footer {
   margin: 16px 0 0;

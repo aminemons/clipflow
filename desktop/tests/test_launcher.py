@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from backend.speech_assets import BUNDLED_MODEL_FILES
 from desktop import launcher
 
 
@@ -26,6 +27,20 @@ def test_configure_logging_creates_rotating_log(tmp_path, monkeypatch):
 
     assert path == tmp_path / "logs" / "desktop.log"
     assert "startup test" in path.read_text(encoding="utf-8")
+
+
+def test_configure_environment_exposes_bundled_models(tmp_path, monkeypatch):
+    resources = tmp_path / "package" / "resources"
+    (resources / "models").mkdir(parents=True)
+    monkeypatch.setattr(launcher, "_app_data", lambda: tmp_path / "app-data")
+    monkeypatch.setattr(launcher, "_resource_dir", lambda name: resources / name)
+    monkeypatch.delenv("CLIPFLOW_BUNDLED_MODEL_DIR", raising=False)
+
+    launcher._configure_environment()
+
+    assert launcher.os.environ["CLIPFLOW_BUNDLED_MODEL_DIR"] == str(
+        resources / "models"
+    )
 
 
 def test_browser_fallback_opens_url_and_reports_log(monkeypatch, tmp_path):
@@ -69,3 +84,36 @@ def test_wait_for_health_fails_fast_when_server_thread_reports_error():
             timeout=10,
             server_holder={"error": RuntimeError("backend import failed")},
         )
+
+
+def test_frozen_runtime_requires_silero_model(tmp_path, monkeypatch):
+    monkeypatch.setattr(launcher.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(launcher.sys, "_MEIPASS", str(tmp_path), raising=False)
+
+    with pytest.raises(RuntimeError, match="local speech files are missing"):
+        launcher._assert_frozen_speech_assets()
+
+
+def test_frozen_runtime_accepts_current_silero_model(tmp_path, monkeypatch):
+    assets = tmp_path / "faster_whisper" / "assets"
+    assets.mkdir(parents=True)
+    (assets / "silero_vad_v6.onnx").write_bytes(b"model")
+    model = tmp_path / "resources" / "models" / "small"
+    model.mkdir(parents=True)
+    for name in BUNDLED_MODEL_FILES:
+        (model / name).write_bytes(b"model")
+    monkeypatch.setattr(launcher.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(launcher.sys, "_MEIPASS", str(tmp_path), raising=False)
+
+    launcher._assert_frozen_speech_assets()
+
+
+def test_frozen_runtime_requires_bundled_whisper_model(tmp_path, monkeypatch):
+    assets = tmp_path / "faster_whisper" / "assets"
+    assets.mkdir(parents=True)
+    (assets / "silero_vad_v6.onnx").write_bytes(b"model")
+    monkeypatch.setattr(launcher.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(launcher.sys, "_MEIPASS", str(tmp_path), raising=False)
+
+    with pytest.raises(RuntimeError, match="local speech files are missing"):
+        launcher._assert_frozen_speech_assets()

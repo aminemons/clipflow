@@ -25,6 +25,7 @@ type TourStep = {
   target?: string;
   title: string;
   body: string;
+  action: string;
   needsProject?: boolean;
   needsClips?: boolean;
 };
@@ -44,6 +45,7 @@ const tourSteps: TourStep[] = [
     target: "projects-nav",
     title: "Your project library",
     body: "Projects keep the source, editable clips, captions, and exports together. Start here whenever you need to return to work.",
+    action: "Open a project card, or choose New project.",
   },
   {
     page: "projects",
@@ -51,6 +53,7 @@ const tourSteps: TourStep[] = [
     target: "new-project",
     title: "Import a source",
     body: "Choose a local video or inspect a YouTube link first. After Check video, choose a download quality and import. If YouTube blocks the request, upload your video file instead. Importing does not generate clips.",
+    action: "Upload an MP4, MOV, or WebM file for the most reliable start.",
   },
   {
     page: "projects",
@@ -58,6 +61,7 @@ const tourSteps: TourStep[] = [
     target: "project-library",
     title: "Open the source",
     body: "Open a project from the library to continue. Rename, tag, favorite, or archive projects from the library controls.",
+    action: "Click the project name to open its clip setup.",
   },
   {
     page: "editor",
@@ -65,6 +69,7 @@ const tourSteps: TourStep[] = [
     target: "editor-generation",
     title: "Configure before generating",
     body: "Clip setup is one reviewable pass: choose moments, framing, captions, and audio, then Generate clips.",
+    action: "Move through the five numbered setup steps before generating.",
     needsProject: true,
   },
   {
@@ -73,6 +78,7 @@ const tourSteps: TourStep[] = [
     target: "setup-source",
     title: "Check source details",
     body: "Confirm the duration and dimensions. Use the source preview to mark exact ranges when you want manual moments.",
+    action: "Play the source and confirm that its audio and duration are correct.",
     needsProject: true,
   },
   {
@@ -81,6 +87,7 @@ const tourSteps: TourStep[] = [
     target: "setup-moments",
     title: "Choose moments",
     body: "Smart highlights rank spoken or structural moments. Full source splits the whole video. Manual mode uses the ranges you add.",
+    action: "Pick Smart highlights for a ranked shortlist, then set target length and clip count.",
     needsProject: true,
   },
   {
@@ -89,6 +96,7 @@ const tourSteps: TourStep[] = [
     target: "setup-camera",
     title: "Choose the crop",
     body: "Adaptive and follow framing are evaluated during rendering. Fit preserves the full source; manual crop gives you a fixed composition.",
+    action: "Use Automatic tracking for a speaker, then review the rendered proof.",
     needsProject: true,
   },
   {
@@ -97,6 +105,7 @@ const tourSteps: TourStep[] = [
     target: "setup-captions",
     title: "Set captions and audio",
     body: "Choose automatic captions, one manual overlay, or no captions. Pick the font, size, color, position, language, and audio cleanup before generating.",
+    action: "Choose the spoken language explicitly when automatic detection may be uncertain.",
     needsProject: true,
   },
   {
@@ -105,6 +114,7 @@ const tourSteps: TourStep[] = [
     target: "setup-review",
     title: "Review the generation pass",
     body: "Check the summary, then Generate clips. The results remain editable; generation does not publish or export by itself.",
+    action: "Read the summary, then press Generate clips once.",
     needsProject: true,
   },
   {
@@ -113,6 +123,7 @@ const tourSteps: TourStep[] = [
     target: "editor-library",
     title: "Review the clip library",
     body: "Generated clips stay in the library as separate editable items. Select one to work on it without changing which clips are checked for export.",
+    action: "Click a clip row to make it the active editing clip.",
     needsProject: true,
     needsClips: true,
   },
@@ -122,6 +133,7 @@ const tourSteps: TourStep[] = [
     target: "editor-selection",
     title: "Choose export clips",
     body: "Use the library selection controls to choose the clips that will be exported. Working on a clip does not silently change this selection.",
+    action: "Check only the clips you want in the next batch export.",
     needsProject: true,
     needsClips: true,
   },
@@ -131,6 +143,7 @@ const tourSteps: TourStep[] = [
     target: "editor-review",
     title: "Mark clips for review",
     body: "Review a rendered clip in the library and keep its review state visible while you work through a batch.",
+    action: "Keep useful suggestions and discard weak ones; discarded clips can be restored.",
     needsProject: true,
     needsClips: true,
   },
@@ -140,6 +153,7 @@ const tourSteps: TourStep[] = [
     target: "editor-timeline",
     title: "Trim the selected clip",
     body: "Move the timeline handles or use the playhead to set the source start and end. Source timestamps stay separate from the rendered preview.",
+    action: "Zoom the timeline, drag both trim handles, then play across each cut.",
     needsProject: true,
     needsClips: true,
   },
@@ -149,6 +163,7 @@ const tourSteps: TourStep[] = [
     target: "editor-transcript",
     title: "Correct the transcript",
     body: "Use Transcript to search speech and correct recognition text. To import an SRT or VTT file, open Captions. Corrections keep their original timing.",
+    action: "Click a transcript line to seek, then edit any recognition mistake.",
     needsProject: true,
     needsClips: true,
   },
@@ -158,6 +173,7 @@ const tourSteps: TourStep[] = [
     target: "editor-captions",
     title: "Style the captions",
     body: "Open Captions to choose the overlay style, font, position, and whether captions are burned into the render.",
+    action: "Drag the caption position and render a proof to check safe margins.",
     needsProject: true,
     needsClips: true,
   },
@@ -167,6 +183,7 @@ const tourSteps: TourStep[] = [
     target: "editor-clip-name",
     title: "Name the selected clip",
     body: "Give the selected clip a useful name so it is easy to identify in review, export, and publishing.",
+    action: "Use a short title that describes the moment, not a clip number.",
     needsProject: true,
     needsClips: true,
   },
@@ -176,6 +193,7 @@ const tourSteps: TourStep[] = [
     target: "editor-save",
     title: "Save draft settings",
     body: "Media edits are drafts. Save settings before you render or leave the editor; the status beside the action tells you whether the server has the latest values.",
+    action: "Wait for Saved before rendering or changing pages.",
     needsProject: true,
     needsClips: true,
   },
@@ -185,6 +203,7 @@ const tourSteps: TourStep[] = [
     target: "editor-render",
     title: "Render the proof",
     body: "Render preview to see the actual crop, caption burn-in, speed, and audio effects. Source playback does not simulate camera tracking.",
+    action: "Render after each meaningful camera, caption, or audio change.",
     needsProject: true,
     needsClips: true,
   },
@@ -194,6 +213,7 @@ const tourSteps: TourStep[] = [
     target: "editor-preview",
     title: "Inspect the result",
     body: "Play the rendered proof and seek it. If the framing or captions need work, edit the draft, save again, and render a new proof.",
+    action: "Watch the beginning, one middle cut, and the ending before approval.",
     needsProject: true,
     needsClips: true,
   },
@@ -203,6 +223,7 @@ const tourSteps: TourStep[] = [
     target: "editor-export",
     title: "Export the current clip",
     body: "Export current renders just the clip open in the editor. For a batch, use the checkboxes and Export button in the clip library. The clip being edited and the clips checked for export are separate choices. Select one or several clips, then export an MP4 or ZIP.",
+    action: "Export one clip here, or return to the library for a ZIP batch.",
     needsProject: true,
     needsClips: true,
   },
@@ -212,6 +233,7 @@ const tourSteps: TourStep[] = [
     target: "exports-nav",
     title: "Download finished files",
     body: "Exports shows progress, errors, retries, and immutable download files. A later render does not replace an earlier export artifact.",
+    action: "Wait for Done, then download the MP4 or ZIP from this page.",
   },
   {
     page: "publish",
@@ -219,6 +241,7 @@ const tourSteps: TourStep[] = [
     target: "publish-nav",
     title: "Review publishing",
     body: "Publishing is a separate, explicit step. Approve rendered clips, choose destination accounts, review the plan, and confirm only when you intend to contact a provider.",
+    action: "Confirm the account, caption, privacy, and schedule before publishing.",
   },
   {
     page: "settings",
@@ -226,6 +249,7 @@ const tourSteps: TourStep[] = [
     target: "settings-nav",
     title: "Configure providers and accounts",
     body: "Settings holds optional transcription, highlight, vision, B-roll, and publishing credentials. Keys stay server-side; local editing and export remain available without them.",
+    action: "Add a provider only when you need it; the local workflow needs no key.",
   },
 ];
 
@@ -507,6 +531,15 @@ export default function GuidedTour({
     !unavailable &&
     activeStep.page === page;
   const layerClass = `guided-tour-layer${reducedMotion ? " guided-tour-reduced-motion" : ""}`;
+  const openRequiredWork = () => {
+    closeTour("dismissed");
+    if (!hasProject) {
+      onNavigate("projects");
+      return;
+    }
+    onNavigate("editor");
+    onReveal?.("editor-generation");
+  };
   if (mode === "welcome")
     return (
       <div className={layerClass}>
@@ -525,11 +558,18 @@ export default function GuidedTour({
           <p className="guided-tour-kicker">A practical walkthrough</p>
           <h2 id="guided-tour-welcome-title">From source to publish</h2>
           <p>
-            Follow the complete path through import, setup, editing, proof,
-            export, and explicit publishing.
+            Follow one project from import to a checked export. The tour points
+            to the real controls and explains what each action changes.
           </p>
+          <ol className="guided-tour-workflow" aria-label="Clipflow workflow">
+            <li>Import</li>
+            <li>Choose moments</li>
+            <li>Frame and caption</li>
+            <li>Review a proof</li>
+            <li>Export</li>
+          </ol>
           <p className="guided-tour-meta">
-            {tourSteps.length} steps · You can pause or skip at any time
+            {tourSteps.length} steps · The tour never changes your project
           </p>
           <div className="guided-tour-actions guided-tour-actions-welcome">
             <button className="guided-tour-primary" onClick={() => startTour()}>
@@ -593,12 +633,20 @@ export default function GuidedTour({
         </div>
         <h2 id="guided-tour-step-title">{activeStep.title}</h2>
         <p id="guided-tour-step-body">{activeStep.body}</p>
+        <p className="guided-tour-action">
+          <strong>Try it:</strong> {activeStep.action}
+        </p>
         {unavailable && (
-          <p className="guided-tour-meta">
-            {!hasProject
-              ? "Import or open a project to try this step. You can continue reading the walkthrough now."
-              : "Generate at least one clip to try this step in the editor."}
-          </p>
+          <div className="guided-tour-missing">
+            <p>
+              {!hasProject
+                ? "Open or import a project to use this control."
+                : "Generate at least one clip to use this control."}
+            </p>
+            <button type="button" onClick={openRequiredWork}>
+              {!hasProject ? "Open Projects" : "Open clip setup"}
+            </button>
+          </div>
         )}
         {targetMissing && (
           <p className="guided-tour-meta">

@@ -97,6 +97,34 @@
   color: #8a93a2;
   font-size: 11px;
 }
+.guided-tour-workflow {
+  display: grid;
+  gap: 7px;
+  margin: 18px 0 0;
+  padding: 0;
+  color: var(--tour-ink);
+  counter-reset: workflow;
+  list-style: none;
+}
+.guided-tour-workflow li {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 12px;
+  counter-increment: workflow;
+}
+.guided-tour-workflow li::before {
+  display: grid;
+  width: 20px;
+  height: 20px;
+  place-items: center;
+  border-radius: 50%;
+  color: var(--tour-blue-dark);
+  background: #edf0ff;
+  content: counter(workflow);
+  font-size: 10px;
+  font-weight: 700;
+}
 
 .guided-tour-popover {
   padding: 19px 20px 17px;
@@ -178,6 +206,14 @@
   font-size: 12px;
   line-height: 1.55;
 }
+.guided-tour-popover .guided-tour-action {
+  padding-top: 9px;
+  border-top: 1px solid #e6e9f0;
+  color: #46506a;
+}
+.guided-tour-action strong {
+  color: var(--tour-ink);
+}
 
 .guided-tour-missing {
   margin: 11px 0 0;
@@ -187,6 +223,19 @@
   background: #f4f6ff;
   font-size: 11px;
   line-height: 1.4;
+}
+.guided-tour-missing p {
+  margin: 0;
+}
+.guided-tour-missing button {
+  margin-top: 8px;
+  padding: 0;
+  border: 0;
+  color: var(--tour-blue-dark);
+  background: transparent;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
 }
 
 .guided-tour-actions {

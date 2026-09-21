@@ -21,6 +21,8 @@ import urllib.request
 import webbrowser
 from pathlib import Path
 
+from backend.speech_assets import BUNDLED_MODEL_FILES, BUNDLED_MODEL_NAME
+
 
 APP_NAME = "Clipflow"
 LOGGER = logging.getLogger("clipflow.desktop")
@@ -31,6 +33,14 @@ def _bundle_root() -> Path:
     if getattr(sys, "frozen", False):
         return Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
     return Path(__file__).resolve().parents[1]
+
+
+def _resource_dir(name: str) -> Path:
+    """Locate a large resource in source and PyInstaller onedir layouts."""
+    candidate = _bundle_root() / "resources" / name
+    if not candidate.is_dir() and getattr(sys, "frozen", False):
+        candidate = Path(sys.executable).resolve().parent / "resources" / name
+    return candidate
 
 
 def _app_data() -> Path:
@@ -53,22 +63,21 @@ def _configure_environment() -> tuple[Path, Path]:
     os.environ["CLIPFLOW_SETTINGS_FILE"] = str(settings_file)
     os.environ["CLIPFLOW_DESKTOP"] = "1"
 
-    bundle_ffmpeg = _bundle_root() / "resources" / "ffmpeg"
-    if not bundle_ffmpeg.is_dir() and getattr(sys, "frozen", False):
-        # PyInstaller's onedir bootloader puts Python data below _internal,
-        # while build.ps1 keeps large redistributables beside the executable.
-        bundle_ffmpeg = Path(sys.executable).resolve().parent / "resources" / "ffmpeg"
+    # PyInstaller keeps Python data below _internal. Large resources are kept
+    # beside the executable so they can be verified and replaced independently.
+    bundle_ffmpeg = _resource_dir("ffmpeg")
     ffmpeg_dir = os.environ.get("CLIPFLOW_FFMPEG_DIR")
     if not ffmpeg_dir and bundle_ffmpeg.is_dir():
         ffmpeg_dir = str(bundle_ffmpeg)
     if ffmpeg_dir:
         os.environ["CLIPFLOW_FFMPEG_DIR"] = ffmpeg_dir
         os.environ["PATH"] = ffmpeg_dir + os.pathsep + os.environ.get("PATH", "")
-    bundle_node = _bundle_root() / "resources" / "node"
-    if not bundle_node.is_dir() and getattr(sys, "frozen", False):
-        bundle_node = Path(sys.executable).resolve().parent / "resources" / "node"
+    bundle_node = _resource_dir("node")
     if bundle_node.is_dir() and (bundle_node / "node.exe").is_file():
         os.environ["PATH"] = str(bundle_node) + os.pathsep + os.environ.get("PATH", "")
+    bundle_models = _resource_dir("models")
+    if bundle_models.is_dir():
+        os.environ["CLIPFLOW_BUNDLED_MODEL_DIR"] = str(bundle_models)
     return data_dir, settings_file
 
 
@@ -93,6 +102,24 @@ def _configure_logging(app_data: Path) -> Path:
         LOGGER.addHandler(handler)
     LOG_PATH = log_path
     return log_path
+
+
+def _assert_frozen_speech_assets() -> None:
+    """Fail at startup when a portable build omitted faster-whisper data."""
+    if not getattr(sys, "frozen", False):
+        return
+    assets = _bundle_root() / "faster_whisper" / "assets"
+    names = {path.name for path in assets.glob("silero*.onnx") if path.is_file()}
+    valid = "silero_vad_v6.onnx" in names or {
+        "silero_encoder_v5.onnx",
+        "silero_decoder_v5.onnx",
+    }.issubset(names)
+    model = _resource_dir("models") / BUNDLED_MODEL_NAME
+    if not valid or not all((model / name).is_file() for name in BUNDLED_MODEL_FILES):
+        raise RuntimeError(
+            "This Clipflow package is incomplete: local speech files are missing. "
+            "Download a rebuilt desktop package before creating automatic clips."
+        )
 
 
 def _show_startup_message(message: str, *, error: bool = False) -> None:
@@ -203,6 +230,7 @@ def _run_server(port: int, holder: dict[str, object]):
 def run(*, headless: bool = False, port: int | None = None) -> int:
     data_dir, _settings_file = _configure_environment()
     _configure_logging(data_dir.parent)
+    _assert_frozen_speech_assets()
     LOGGER.info("Starting Clipflow desktop (frozen=%s)", getattr(sys, "frozen", False))
     chosen_port = port or _pick_port()
     server_holder: dict[str, object] = {}

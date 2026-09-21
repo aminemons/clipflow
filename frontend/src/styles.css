@@ -881,6 +881,34 @@ a svg {
   border-radius: 3px;
   font-size: 13px;
 }
+.right-panel-guide {
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+  background: #f7f8fb;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+.editor-empty-state {
+  margin: 18px 14px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--muted);
+  background: #f8f9fc;
+}
+.editor-empty-state h3 {
+  margin: 10px 0 6px;
+  color: var(--ink);
+  font-size: 15px;
+}
+.editor-empty-state p {
+  margin: 0 0 14px;
+  font-size: 12px;
+  line-height: 1.55;
+}
 .pane-title {
   font-size: 15px;
   font-weight: 600;

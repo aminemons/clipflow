@@ -175,6 +175,93 @@ def test_mkl_memory_error_clears_model_cache_and_is_actionable(monkeypatch, tmp_
     assert not transcription._MODEL_CACHE
 
 
+def test_missing_vad_asset_does_not_expose_packaging_path(monkeypatch, tmp_path):
+    private_path = r"C:\\Users\\tester\\build\\_internal\\faster_whisper\\assets\\silero_vad_v6.onnx"
+
+    class Model:
+        def __init__(self, *args, **kwargs):
+            raise RuntimeError(
+                f"[ONNXRuntimeError] : 3 : NO_SUCHFILE : Load model from {private_path} failed. File doesn't exist"
+            )
+
+    monkeypatch.setitem(
+        sys.modules, "faster_whisper", SimpleNamespace(WhisperModel=Model)
+    )
+    monkeypatch.setattr(transcription, "_MODEL_CACHE", transcription.OrderedDict())
+    source = tmp_path / "audio.wav"
+
+    with pytest.raises(RuntimeError) as caught:
+        transcription._local(
+            source,
+            2,
+            lambda *_: None,
+            {
+                "provider": "local",
+                "model": "tiny",
+                "language": "en",
+                "quality": "fast",
+                "initial_prompt": "",
+                "dialect": "none",
+                "groq_model": "whisper-large-v3-turbo",
+                "cpu_threads": 2,
+            },
+        )
+
+    message = str(caught.value)
+    assert "latest Clipflow desktop package" in message
+    assert private_path not in message
+
+
+def test_bundled_model_is_ready_without_cache_space(monkeypatch, tmp_path):
+    bundled = tmp_path / "bundle" / "small"
+    bundled.mkdir(parents=True)
+    for name in transcription.BUNDLED_MODEL_FILES:
+        (bundled / name).write_bytes(b"model")
+    monkeypatch.setenv("CLIPFLOW_BUNDLED_MODEL_DIR", str(bundled.parent))
+    monkeypatch.setenv("CLIPFLOW_MODEL_CACHE", str(tmp_path / "empty-cache"))
+    monkeypatch.setattr(
+        transcription.shutil,
+        "disk_usage",
+        lambda *_: SimpleNamespace(free=0, total=1, used=1),
+    )
+
+    readiness = transcription.model_readiness(
+        tmp_path / "audio.wav", {"provider": "local", "quality": "balanced"}
+    )
+
+    assert readiness["selected_model"] == "small"
+    assert readiness["cached_models"] == ["small"]
+    assert readiness["ready"] is True
+
+
+def test_bundled_model_loads_from_disk_only(monkeypatch, tmp_path):
+    calls = []
+
+    class Model:
+        def __init__(self, *args, **kwargs):
+            calls.append((args, kwargs))
+
+    bundled = tmp_path / "bundle" / "small"
+    bundled.mkdir(parents=True)
+    for name in transcription.BUNDLED_MODEL_FILES:
+        (bundled / name).write_bytes(b"model")
+    monkeypatch.setenv("CLIPFLOW_BUNDLED_MODEL_DIR", str(bundled.parent))
+    monkeypatch.setitem(
+        sys.modules, "faster_whisper", SimpleNamespace(WhisperModel=Model)
+    )
+    monkeypatch.setattr(transcription, "_MODEL_CACHE", transcription.OrderedDict())
+
+    loaded = transcription._load_local_model(
+        tmp_path / "audio.wav",
+        {"model": "small", "language": "auto", "cpu_threads": 2},
+        lambda *_: None,
+    )
+
+    assert isinstance(loaded, Model)
+    assert calls[0][0] == (str(bundled),)
+    assert calls[0][1]["local_files_only"] is True
+
+
 def test_groq_payload_uses_effective_language_model_and_prompt(monkeypatch, tmp_path):
     requests = []
 

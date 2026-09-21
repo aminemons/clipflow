@@ -7,13 +7,14 @@ Use this checklist before presenting a new build or hosted revision. Mark an ite
 - [ ] `python -m compileall backend launch.py`
 - [ ] `Push-Location frontend; npm ci; npm run build; npm test; Pop-Location`
 - [ ] `python -m pytest -q` passes, with warnings recorded separately.
-- [ ] `.env`, provider credentials, user media, generated exports, model caches, and private fonts are absent from the build context and release archive.
-- [ ] The desktop package, if distributed, passes `Clipflow.exe --self-test` and retains its FFmpeg license notice.
+- [ ] `.env`, provider credentials, user media, generated exports, model caches, and private fonts are absent from the release archive; only the documented Small model is included.
+- [ ] `desktop/verify_bundle.py` passes before the ZIP is created.
+- [ ] The extracted desktop package passes `Clipflow.exe --self-test` and retains its FFmpeg license notice.
 
 ## Local workflow
 
 - [ ] Import a local video, create a project, run one clip setup, edit a clip, render a preview, export MP4, and download it.
-- [ ] Run one caption path with local Whisper and verify the selected model has enough disk or memory.
+- [ ] Disconnect the build machine from the network, then run one automatic-caption path from the extracted desktop package and confirm the included Small model loads.
 - [ ] Exercise the YouTube inspect/import path with a currently available source and confirm a failed source leaves no stuck job.
 - [ ] Check transcript correction, caption positioning, speed/audio edits, crop/follow framing, delete/restore, refresh persistence, and batch ZIP output.
 

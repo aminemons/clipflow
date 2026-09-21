@@ -20,7 +20,13 @@ source tree, runs `npm ci` and the production frontend build, and installs
 the desktop-only packages in the selected Python environment. It includes
 FFmpeg/FFprobe and the PATH Node.js executable by default; Node is used by
 yt-dlp for current YouTube JavaScript challenges, and the `yt_dlp_ejs`
-support package is collected into the bundle.
+support package is collected into the bundle. The build also downloads a pinned
+snapshot of `Systran/faster-whisper-small` into the portable folder.
+
+Before the ZIP is created, `desktop/verify_bundle.py` checks the files that a
+normal import test cannot see: the included speech model, faster-whisper Silero
+VAD model, ONNX Runtime DLLs, curl-cffi's browser transport, the built frontend,
+Node.js, FFmpeg, and FFprobe. The build stops if any of them is missing.
 
 The FFmpeg build is large. For a source-only deployment, use
 `pwsh desktop/build.ps1 -WithoutFfmpeg` and put `ffmpeg.exe` and `ffprobe.exe`
@@ -38,15 +44,15 @@ yt-dlp before freezing. Install `backend/requirements.txt` there first.
 ## Run and verify
 
 Double-click `Clipflow.exe`, or run `Clipflow.exe --self-test` for a headless
-API check. The self-test starts the same local service and verifies
-`/api/health`, then exits. A source checkout can run the wrapper with
+API check. The launcher first checks the packaged speech assets; the self-test
+then starts the same local service and verifies `/api/health`. A source checkout can run the wrapper with
 `python -m desktop.launcher --headless` after installing the desktop and backend
 requirements.
 
 The editor's Settings page accepts optional Groq or Higgsfield keys. Local
 transcription remains the default and needs no paid API key. Its selected
-speech model is downloaded on first use when the user chooses it, and models
-are kept outside the package.
+Small model is included and works without an Internet connection. Models chosen
+instead of Small are downloaded on first use and kept in the user's data area.
 
 ## Troubleshooting startup
 
@@ -63,7 +69,9 @@ where the runtime or its .NET integration is unavailable.
 ## Packaging boundaries
 
 The portable package excludes `.env`, user media, project databases, model
-caches, licensed Neue Einstellung fonts, and generated exports. The bundled
+caches, licensed Neue Einstellung fonts, and generated exports. It intentionally
+includes the pinned multilingual Small model under `resources/models/small`;
+the model card and `MODEL-SOURCE.txt` record its origin and license. The bundled
 Outfit font is distributed under its existing OFL license. Runtime credentials
 are written only to the per-user settings file and are not returned to the UI.
 

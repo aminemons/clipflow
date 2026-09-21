@@ -47,6 +47,7 @@ import CaptionPresets from "./CaptionPresets";
 import ClipLibrary from "./ClipLibrary";
 import { libraryPatch, type LibraryPatch } from "./clipLibraryModel";
 import { parseSubtitles } from "./subtitleImport";
+import { api, AUTH_EXPIRED_EVENT } from "./apiClient";
 import "./workspace.css";
 import type {
   Clip,
@@ -57,7 +58,6 @@ import type {
 } from "./editorTypes";
 
 const API = "/api";
-const AUTH_EXPIRED_EVENT = "clipflow-auth-expired";
 const DEFAULT_CLIP: Omit<Clip, "id"> = {
   title: "Untitled clip",
   start: 0,
@@ -80,37 +80,6 @@ const DEFAULT_CLIP: Omit<Clip, "id"> = {
   status: "draft",
 };
 
-async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API}${path}`, {
-    ...init,
-    headers: {
-      ...(init?.body instanceof FormData
-        ? {}
-        : { "Content-Type": "application/json" }),
-      ...init?.headers,
-    },
-  });
-  if (response.status === 401) {
-    window.dispatchEvent(new Event(AUTH_EXPIRED_EVENT));
-  }
-  if (!response.ok) {
-    const message = await response.text();
-    try {
-      const parsed = JSON.parse(message);
-      throw new Error(
-        typeof parsed.detail === "string"
-          ? parsed.detail
-          : parsed.detail?.message ||
-              `Check your input (HTTP ${response.status}).`,
-      );
-    } catch (error) {
-      if (error instanceof SyntaxError)
-        throw new Error(message || `Request failed (${response.status})`);
-      throw error;
-    }
-  }
-  return response.status === 204 ? (undefined as T) : response.json();
-}
 const fmt = (seconds: number) => {
   const s = Math.max(0, Math.floor(seconds));
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
@@ -149,7 +118,7 @@ export default function App() {
   const [clips, setClips] = useState<Clip[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [sidebar, setSidebar] = useState<
-    "clips" | "exports" | "connections" | "transcript"
+    "clips" | "connections" | "transcript"
   >("clips");
   const targetDuration = 30;
   const [job, setJob] = useState<Job | null>(null);
@@ -271,6 +240,10 @@ export default function App() {
   const selected = clips.find((c) => c.id === selectedId) ?? clips[0];
   const duration = project?.duration || 0;
   const isBusy = job?.status === "queued" || job?.status === "running";
+  const brollAvailable = health.configuration?.higgsfield?.configured === true;
+  useEffect(() => {
+    if (!brollAvailable && sidebar === "connections") setSidebar("clips");
+  }, [brollAvailable, sidebar]);
 
   const refreshProjects = useCallback(async () => {
     try {
@@ -1573,7 +1546,25 @@ export default function App() {
                     )}
                   </div>
                   <div className="inspector-content" ref={inspectorContent}>
-                    {project && (
+                    {project && !selected && (
+                      <div className="editor-empty-state">
+                        <Layers3 size={22} aria-hidden="true" />
+                        <h3>Choose a clip to edit</h3>
+                        <p>
+                          Open the clip library on the right, then click a clip.
+                          Checkboxes choose batch exports; they do not change
+                          the clip you are editing.
+                        </p>
+                        <button
+                          className="secondary-action"
+                          type="button"
+                          onClick={() => setSidebar("clips")}
+                        >
+                          Open clip library
+                        </button>
+                      </div>
+                    )}
+                    {project && selected && (
                       <>
                         <div
                           hidden={inspector !== "clipping"}
@@ -2256,8 +2247,13 @@ export default function App() {
                   }
                 >
                   <div className="right-tabs">
-                    {(["clips", "transcript", "connections"] as const).map(
-                      (tab) => (
+                    {(
+                      [
+                        "clips",
+                        "transcript",
+                        ...(brollAvailable ? (["connections"] as const) : []),
+                      ] as const
+                    ).map((tab) => (
                         <button
                           key={tab}
                           className={sidebar === tab ? "active" : ""}
@@ -2281,9 +2277,17 @@ export default function App() {
                             <b>{clips.length}</b>
                           )}
                         </button>
-                      ),
-                    )}
+                      ))}
                   </div>
+                  <p className="right-panel-guide">
+                    {sidebar === "clips"
+                      ? "Click a clip to edit it. Checkboxes choose clips for batch export."
+                      : sidebar === "transcript"
+                        ? selected?.transcript
+                          ? `Editing the transcript for ${selected.title}. Click any line to seek.`
+                          : "Showing the source transcript. Select consecutive lines to create a clip."
+                        : "Generate an optional insert as a separate project."}
+                  </p>
                   {sidebar === "clips" && (
                     <ClipLibrary
                       key={project?.id}

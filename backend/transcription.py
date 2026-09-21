@@ -5,7 +5,6 @@ from __future__ import annotations
 import gc
 import math
 import importlib.util
-import os
 import shutil
 import tempfile
 import threading
@@ -17,6 +16,7 @@ import httpx
 
 from . import media
 from .config import public_capabilities, value
+from .speech_assets import BUNDLED_MODEL_FILES
 
 Progress = Callable[[str, int], None]
 GROQ_URL = "https://api.groq.com/openai/v1/audio/transcriptions"
@@ -179,6 +179,13 @@ def _memory_failure(exc: BaseException) -> bool:
     )
 
 
+def _missing_runtime_asset(exc: BaseException) -> bool:
+    message = str(exc).lower()
+    return "no_suchfile" in message or (
+        "silero" in message and "doesn't exist" in message
+    )
+
+
 def _clear_model_cache() -> None:
     with _MODEL_LOCK:
         _MODEL_CACHE.clear()
@@ -188,6 +195,10 @@ def _clear_model_cache() -> None:
 _MEMORY_MESSAGE = (
     "Local Whisper ran out of memory. Close other apps and retry, choose the Fast/Quick draft option, "
     "or use Groq transcription. The model was not silently changed."
+)
+_MISSING_RUNTIME_MESSAGE = (
+    "Local speech recognition is missing a required desktop file. "
+    "Install the latest Clipflow desktop package and try again."
 )
 
 
@@ -232,7 +243,20 @@ def _cache_root(source: Path) -> Path:
     return Path(configured or str(source.parent.parent / "models"))
 
 
+def _bundled_model_path(model: str) -> Path | None:
+    """Return a complete packaged model without consulting the network."""
+    configured = value("CLIPFLOW_BUNDLED_MODEL_DIR", "")
+    if not configured:
+        return None
+    candidate = Path(configured) / model
+    if all((candidate / name).is_file() for name in BUNDLED_MODEL_FILES):
+        return candidate
+    return None
+
+
 def _model_is_cached(cache_root: Path, model: str) -> bool:
+    if _bundled_model_path(model) is not None:
+        return True
     names = (
         f"faster-whisper-{model}",
         f"models--Systran--faster-whisper-{model}",
@@ -345,7 +369,7 @@ def resolve_local_options(source: Path, options: dict) -> tuple[dict, str]:
 
 
 def _preflight_model(cache_root: Path, model: str) -> None:
-    if _model_is_cached(cache_root, model):
+    if _bundled_model_path(model) is not None or _model_is_cached(cache_root, model):
         return
     # Approximate compressed model footprints; this avoids starting a multi-GB
     # download on the small system disk while still allowing an explicitly
@@ -372,7 +396,9 @@ def _load_local_model(source: Path, options: dict, progress: Progress):
     _preflight_model(cache_root, model_name)
     from faster_whisper import WhisperModel
 
-    key = (model_name, device, compute, str(cache_root.resolve()))
+    bundled_model = _bundled_model_path(model_name)
+    model_source = str(bundled_model) if bundled_model else model_name
+    key = (model_source, device, compute, str(cache_root.resolve()))
     with _MODEL_LOCK:
         cached = _MODEL_CACHE.get(key)
         if cached is not None:
@@ -383,14 +409,21 @@ def _load_local_model(source: Path, options: dict, progress: Progress):
         )
         media._check_cancel()
         try:
+            model_kwargs = {
+                "device": device,
+                "compute_type": compute,
+                "download_root": str(cache_root),
+                "cpu_threads": options.get("cpu_threads", 2),
+            }
+            if bundled_model is not None:
+                model_kwargs["local_files_only"] = True
             model = WhisperModel(
-                model_name,
-                device=device,
-                compute_type=compute,
-                download_root=str(cache_root),
-                cpu_threads=options.get("cpu_threads", 2),
+                model_source,
+                **model_kwargs,
             )
-        except (MemoryError, RuntimeError) as exc:
+        except (MemoryError, OSError, RuntimeError) as exc:
+            if _missing_runtime_asset(exc):
+                raise RuntimeError(_MISSING_RUNTIME_MESSAGE) from exc
             if not _memory_failure(exc):
                 raise
             _MODEL_CACHE.clear()
@@ -440,7 +473,10 @@ def _local(
                 min(98, 8 + int(segment.end / max(duration, 1) * 90)),
             )
         return rows
-    except (MemoryError, RuntimeError) as exc:
+    except (MemoryError, OSError, RuntimeError) as exc:
+        if _missing_runtime_asset(exc):
+            _clear_model_cache()
+            raise RuntimeError(_MISSING_RUNTIME_MESSAGE) from exc
         if not _memory_failure(exc):
             raise
         _clear_model_cache()

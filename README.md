@@ -1,94 +1,130 @@
 # Clipflow
 
-Clipflow is a local-first video editor for turning long recordings into short, captioned clips. It combines a React/Vite editor with a FastAPI worker, FFmpeg rendering, OpenCV framing, local Whisper transcription, and yt-dlp imports.
+Clipflow turns a horizontal recording into editable vertical clips. It was
+built for a full-stack engineering exercise, so the complete path works on a
+local machine without an account or paid API: import, choose moments, reframe,
+caption, review, and export.
 
-The normal flow is explicit: create or open a project, import a local file or inspect and download a YouTube source, choose a clip setup, review the suggested clips, then edit and export. Importing a source does not silently analyze it.
+The editor does not hide long-running work. Uploads, transcription, previews,
+and exports run as jobs with visible progress and recoverable errors. Importing
+a source also stays separate from generating clips, which makes it safe to
+review every choice before processing starts.
 
-## What it does
+## Run it on Windows
 
-- Imports local video files and selected YouTube sources.
-- Creates clips from a full source, transcript moments, or manual ranges.
-- Provides local smart highlights, transcript editing, captions, speed, mute, fades, denoise, and crop/follow framing.
-- Renders MP4 clips with H.264 video, AAC audio, burned captions, and SRT downloads where selected.
-- Exports individual clips or a ZIP batch.
-- Offers optional provider integrations for hosted transcription, text ranking, vision framing, generative B-roll, and publishing. Each provider is opt-in from Settings and uses the account or credentials supplied by the owner.
-
-## Free path and optional providers
-
-Local mode needs no account or paid API key. OpenCV framing, local highlight ranking, FFmpeg rendering, and on-device Whisper transcription run on the machine. The selected Whisper model is downloaded on first use and needs free disk space; Fast/tiny is an option on modest hardware; larger models take more time and memory.
-
-Groq can provide hosted transcription or highlight ranking. OpenAI, Anthropic, Gemini, and Ollama options are available for the provider features implemented in Settings. Higgsfield is an optional generative B-roll integration. Publishing integrations need their own OAuth or provider setup. The supplied deployment has no paid provider configured, and no provider account or credits are included with Clipflow.
-
-## Run locally
-
-Prerequisites:
-
-- Python 3.11 or newer
-- Node.js 20 or newer with `npm`
-- FFmpeg and FFprobe on `PATH`
-- Several GB of free disk space for dependencies, source media, renders, and Whisper models
-
-From the repository root, use PowerShell on Windows:
+Install Python 3.11+, Node.js 20+, and FFmpeg. Then run this from the repository
+root in PowerShell:
 
 ```powershell
 python launch.py
 ```
 
-On macOS or Linux, use the same launcher with the available Python command, usually:
+The launcher creates a virtual environment, installs the Python and JavaScript
+dependencies, builds the frontend, and opens `http://127.0.0.1:8767`. Keep the
+terminal open while using Clipflow.
 
-```sh
-python3 launch.py
-```
-
-`start.cmd` is a Windows convenience wrapper for `python launch.py`.
-
-The launcher creates `.env` from `.env.example`, creates `.venv`, installs `backend/requirements.txt`, builds the frontend, and opens `http://127.0.0.1:8767`. Keep the terminal open while using the editor. Useful options are `python launch.py --no-browser`, `python launch.py --port 9000`, and `python launch.py --rebuild`.
-
-Set `CLIPFLOW_DATA` and `CLIPFLOW_MODEL_CACHE` in `.env` when the default drive does not have enough space. Local mode is the default and does not require Supabase settings. A local Docker smoke environment is also available with:
+For a clean dependency or frontend rebuild:
 
 ```powershell
-docker compose up --build
+python launch.py --rebuild
 ```
 
-It serves the editor at `http://127.0.0.1:8767` and keeps project data in the named `clipflow-data` volume.
+On macOS and Linux, run `python3 launch.py`. Docker users can instead run
+`docker compose up --build` and open the same port.
 
-## Hosted deployment
+## First project
 
-The current hosted shape is an owner-only workspace:
+1. Choose **New project** and upload an MP4, MOV, or WebM file. A public YouTube
+   link can also be inspected and imported.
+2. In **Clip setup**, choose smart highlights, full-source splitting, or manual
+   ranges. Set the target clip length before generating.
+3. Open a generated clip. Trim it on the timeline, choose the camera behavior,
+   correct its transcript, and place the captions.
+4. Save the draft and choose **Render preview**. This proof contains the real
+   crop, tracking, captions, speed, and audio effects.
+5. Export the open clip, or check several clips in the library and export a ZIP.
 
-- Vercel serves the Vite frontend and rewrites relative `/api` and `/media` requests.
-- An Azure VM runs one persistent Dockerized FastAPI worker behind Caddy HTTPS.
-- Supabase Auth verifies the single configured owner. Supabase Storage is not used; projects, source media, renders, and settings remain on the worker's persistent disk.
+The Windows package includes the multilingual Small speech model, so its
+default automatic-clipping path works offline. A source checkout downloads a
+selected Whisper model once; choosing another model in the desktop package does
+the same. The Fast setting has the smallest memory requirement.
 
-The hosted frontend is [clipflow-aminemons.vercel.app](https://clipflow-aminemons.vercel.app). Access is restricted to the configured owner account. Hosted deployment files and the required environment shape are in [docs/HOSTING.md](docs/HOSTING.md) and `deploy/azure/`. Never put Supabase service credentials or provider secrets in Vite variables or committed files.
+## Main features
 
-This deployment is intentionally single-owner and single-worker. A worker restart signs out the in-memory hosted session and interrupts jobs that were running. It is not a multi-user or horizontally scaled service.
+- Local file upload and public YouTube import with bounded retry and clean
+  recovery when YouTube rejects a server connection.
+- Smart, full-source, and manual clip generation with target duration,
+  tolerance, topic, and clip-count controls.
+- A zoomable source timeline with independent active-clip and batch-export
+  selection.
+- Face or subject-following vertical framing, manual camera positions,
+  keyframes, fit, and blurred-background layouts.
+- Local Whisper or optional Groq transcription, transcript correction, SRT/VTT
+  import, draggable captions, and SRT download.
+- Speed, volume, mute, denoise, and audio fades.
+- Rendered proofs, individual MP4 exports, ZIP batches, immutable downloads,
+  delete/restore, and project persistence.
 
-## Architecture
+Optional provider settings exist for hosted transcription, highlight ranking,
+vision framing, B-roll, and publishing. They are outside the free local path and
+only run after the owner supplies the relevant credentials.
 
-The frontend is a Vite-built React application served by the FastAPI process in local mode and by Vercel in the hosted layout. FastAPI stores project metadata and job records as JSON under `CLIPFLOW_DATA`; media and exports are files in the same workspace. Writes use temporary files and replacement, with small backups for project records. An in-process executor runs one job at a time and mirrors job state to disk.
+## How it is built
 
-This keeps the local and owner-hosted paths simple, but it also means large uploads, renders, model downloads, and free disk space are bounded by the worker. A restart does not resume queued or running work. OpenCV tracking is heuristic and can need manual framing on graphic-heavy footage, while local Whisper accuracy depends on the audio and language. YouTube imports depend on the source being available to yt-dlp. YouTube may reject a cloud server with an anti-bot check even for a public video; upload your own video file if that happens.
+The React/Vite frontend talks to a FastAPI service. FFmpeg handles media
+conversion and export, OpenCV provides local framing analysis, faster-whisper
+provides on-device speech recognition, and yt-dlp handles supported YouTube
+sources. Project and job records are stored as JSON beside their media files.
+Writes use temporary files and replacement, and one in-process worker runs media
+jobs sequentially so a small machine is not overloaded.
 
-## Desktop build
+More detail is available in [the architecture notes](docs/ARCHITECTURE.md).
 
-The optional Windows wrapper and portable ZIP instructions are in [docs/DESKTOP.md](docs/DESKTOP.md). The package keeps each user's projects, media, exports, and settings under `%LOCALAPPDATA%\\Clipflow`; it does not bundle `.env`, user data, models, or private fonts. WebView2 is required, with a browser fallback when its runtime is unavailable.
+## Tests
 
-## Validation
-
-The dated validation record in [docs/VALIDATION.md](docs/VALIDATION.md) separates automated checks, real workflow checks, and remaining deployment evidence. It records the exact test counts and the provider, model, browser, and hosted limitations that still matter.
-
-After the launcher has installed the app, run these checks in PowerShell:
+Run the same checks used before a release:
 
 ```powershell
 .venv\Scripts\python -m pip install pytest
-.venv\Scripts\python -m compileall backend launch.py
+.venv\Scripts\python -m compileall backend desktop launch.py
+.venv\Scripts\python -m pytest backend/tests desktop/tests tests -q
 Push-Location frontend
 npm ci
 npm run build
 npm test
 Pop-Location
-.venv\Scripts\python -m pytest -q
 ```
 
-Use [docs/RELEASE-CHECKLIST.md](docs/RELEASE-CHECKLIST.md) for the remaining owner-hosted and distribution checks.
+The integration suite generates real video and audio with FFmpeg, then checks
+upload, clip creation, preview rendering, caption output, MP4 export, ZIP export,
+delete/restore, and persisted state. The exact release evidence is recorded in
+[docs/VALIDATION.md](docs/VALIDATION.md).
+
+## Windows desktop package
+
+The portable Windows build keeps projects and settings under
+`%LOCALAPPDATA%\Clipflow`. Build it from PowerShell with:
+
+```powershell
+pwsh desktop/build.ps1
+```
+
+The script creates `build/desktop/Clipflow-windows-x64.zip`. It downloads a
+pinned copy of the multilingual Small model, then verifies the bundled frontend,
+FFmpeg, Node.js, ONNX Runtime, browser-compatible YouTube transport, model, and
+faster-whisper VAD file before creating the ZIP. See
+[docs/DESKTOP.md](docs/DESKTOP.md) for packaging and licensing details.
+
+## Hosted workspace
+
+The hosted demo uses Vercel for the frontend and one persistent FastAPI worker.
+It is an owner-only workspace rather than a multi-user service. A public YouTube
+video can still be rejected when YouTube challenges the worker's datacenter IP;
+Clipflow retries once with yt-dlp's browser-compatible transport, then offers
+desktop or file upload instead of leaving a failed job running.
+
+Deployment configuration is documented in [docs/HOSTING.md](docs/HOSTING.md).
+Secrets belong in the host configuration and must never be committed or exposed
+through Vite environment variables.
+
+Before sharing a build, complete [the release checklist](docs/RELEASE-CHECKLIST.md).

@@ -1,5 +1,13 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowRight, LoaderCircle, Upload, X, Youtube } from "lucide-react";
+import {
+  ArrowRight,
+  LoaderCircle,
+  RefreshCw,
+  Upload,
+  X,
+  Youtube,
+} from "lucide-react";
+import { ApiError } from "./apiClient";
 import "./SourceImport.css";
 
 export type YoutubeSourceInfo = {
@@ -47,9 +55,31 @@ function formatDuration(duration: number | string) {
   return `${minutes}:${String(seconds).padStart(2, "0")}`;
 }
 
-function inspectErrorMessage(error: unknown) {
-  if (error instanceof Error && error.message.trim()) return error.message;
-  return "We couldn't check that video. Check the URL and try again.";
+type InspectFailure = {
+  title: string;
+  message: string;
+  retryable: boolean;
+};
+
+function inspectFailure(error: unknown): InspectFailure {
+  if (error instanceof ApiError) {
+    return {
+      title:
+        error.code === "youtube_anti_bot"
+          ? "YouTube blocked this connection"
+          : "We couldn't check this video",
+      message: error.message,
+      retryable: error.retryable,
+    };
+  }
+  return {
+    title: "We couldn't check this video",
+    message:
+      error instanceof Error && error.message.trim()
+        ? error.message
+        : "Check the URL and try again.",
+    retryable: true,
+  };
 }
 
 /** Shared import choices for the empty workspace and the new-project dialog. */
@@ -68,7 +98,7 @@ export function SourceImport({
   const requestId = useRef(0);
   const abortRequest = useRef<AbortController | null>(null);
   const [inspectState, setInspectState] = useState<InspectState>("idle");
-  const [inspectError, setInspectError] = useState("");
+  const [inspectError, setInspectError] = useState<InspectFailure | null>(null);
   const [sourceInfo, setSourceInfo] = useState<YoutubeSourceInfo | null>(null);
   const [quality, setQuality] = useState<number | null>(null);
 
@@ -77,7 +107,7 @@ export function SourceImport({
     abortRequest.current?.abort();
     abortRequest.current = null;
     setInspectState("idle");
-    setInspectError("");
+    setInspectError(null);
     setSourceInfo(null);
     setQuality(null);
   };
@@ -105,7 +135,7 @@ export function SourceImport({
     const controller = new AbortController();
     abortRequest.current = controller;
     setInspectState("loading");
-    setInspectError("");
+    setInspectError(null);
     setSourceInfo(null);
     setQuality(null);
     try {
@@ -129,7 +159,7 @@ export function SourceImport({
       ) {
         return;
       }
-      setInspectError(inspectErrorMessage(error));
+      setInspectError(inspectFailure(error));
       setInspectState("error");
     } finally {
       if (currentRequest === requestId.current) abortRequest.current = null;
@@ -227,15 +257,33 @@ export function SourceImport({
       </form>
       {inspectError && (
         <div className="source-import-error" role="alert">
-          <p>{inspectError}</p>
-          <button
-            className="source-import-submit"
-            type="button"
-            disabled={busy}
-            onClick={() => input.current?.click()}
-          >
-            <Upload size={16} /> Choose a video file instead
-          </button>
+          <h3>{inspectError.title}</h3>
+          <p>{inspectError.message}</p>
+          <div className="source-error-actions">
+            {inspectError.retryable && (
+              <button
+                className="source-import-cancel"
+                type="button"
+                disabled={busy}
+                onClick={() => void inspect()}
+              >
+                <RefreshCw size={15} /> Retry
+              </button>
+            )}
+            <button
+              className="source-import-submit"
+              type="button"
+              disabled={busy}
+              onClick={() => input.current?.click()}
+            >
+              <Upload size={16} /> Upload a video
+            </button>
+          </div>
+          <small>
+            On the web, YouTube may reject requests from shared servers. The
+            desktop app uses your own connection and may work when the web app
+            cannot.
+          </small>
         </div>
       )}
       {sourceInfo && inspectState === "success" && (

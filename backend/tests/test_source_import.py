@@ -111,6 +111,44 @@ def test_probe_classifies_antibot_error_without_leaking_provider_text(monkeypatc
         raise AssertionError("anti-bot error was not classified")
 
 
+def test_probe_retries_antibot_with_browser_transport(monkeypatch):
+    attempts = []
+
+    class FakeYoutubeDL:
+        def __init__(self, options):
+            self.options = options
+            attempts.append(options)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def extract_info(self, _url, download=False):
+            assert download is False
+            if len(attempts) == 1:
+                raise RuntimeError("Sign in to confirm you're not a bot")
+            return {
+                "title": "Recovered",
+                "duration": 12,
+                "height": 720,
+                "formats": [{"height": 720, "vcodec": "avc1"}],
+            }
+
+    monkeypatch.setitem(sys.modules, "yt_dlp", types.SimpleNamespace(YoutubeDL=FakeYoutubeDL))
+
+    result = probe_youtube("https://youtu.be/retry")
+
+    assert result["title"] == "Recovered"
+    assert len(attempts) == 2
+    if "impersonate" in attempts[1]:
+        assert str(attempts[1]["impersonate"]) == "chrome"
+    assert attempts[1]["extractor_args"]["youtube"]["player_client"] == [
+        "web_safari"
+    ]
+
+
 def test_classify_download_error_has_stable_actionable_shape():
     error = classify_youtube_error(
         RuntimeError("ERROR: Sign in to confirm you're not a bot"), "download"

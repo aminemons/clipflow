@@ -32,12 +32,11 @@ from .media import (
     metadata,
     render_clip,
     srt_for_clip,
-    track_focus,
 )
 from .store import Store, utc_now
 from .source_probe import (
     YouTubeSourceError,
-    classify_youtube_error,
+    extract_youtube,
     format_selector,
     probe_youtube,
     validate_youtube_url,
@@ -842,8 +841,6 @@ def youtube_job(
     out = store.files / f"{project_id}.mp4"
     update(item, "downloading", 8)
     try:
-        import yt_dlp  # type: ignore
-
         def download_progress(state):
             check_cancelled(item)
             total = state.get("total_bytes") or state.get("total_bytes_estimate") or 1
@@ -868,12 +865,13 @@ def youtube_job(
             "progress_hooks": [download_progress],
             "js_runtimes": {"node": {}},
         }
-        with yt_dlp.YoutubeDL(opts) as dl:
-            try:
-                info = dl.extract_info(normalized_url, download=True)
-            except Exception as exc:
-                raise classify_youtube_error(exc, "download") from exc
-            project["title"] = str(info.get("title") or "YouTube import")[:200]
+        info = extract_youtube(
+            normalized_url,
+            download=True,
+            options=opts,
+            operation="download",
+        )
+        project["title"] = str(info.get("title") or "YouTube import")[:200]
         candidates = [
             p
             for p in store.files.glob(f"{project_id}.download.*")
@@ -882,8 +880,6 @@ def youtube_job(
         if not candidates:
             raise RuntimeError("yt-dlp produced no media")
         shutil.move(str(candidates[0]), str(out))
-    except ImportError as e:
-        raise RuntimeError("YouTube support requires yt-dlp") from e
     except BaseException:
         _cleanup_youtube_downloads(project_id)
         raise

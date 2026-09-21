@@ -44,9 +44,9 @@ Source playback is a fast editing approximation. FFmpeg render proofs use the ex
 
 ## Models, secrets and limits
 
-The free path uses FFmpeg, OpenCV, yt-dlp and faster-whisper. Speech models download once, subject to available disk space; offline operation requires the model already cached. Larger models trade speed and memory for possible accuracy improvements, not a guaranteed dialect result. Groq is optional speech/highlight processing, and Higgsfield is optional remote generation. No successful live provider request is claimed without recorded evidence.
+The free path uses FFmpeg, OpenCV, yt-dlp and faster-whisper. The Windows package includes the multilingual Small model for offline use. Source installs and other model choices download once, subject to available disk space. Larger models trade speed and memory for possible accuracy improvements, not a guaranteed dialect result. Groq is optional speech/highlight processing, and Higgsfield is optional remote generation. No successful live provider request is claimed without recorded evidence.
 
-Credentials stay in the server environment or a private settings file; the browser receives only configured/not-configured flags. They are excluded from Git and source packages. Uploaded content, speech models and user projects are never part of the source repository.
+Credentials stay in the server environment or a private settings file; the browser receives only configured/not-configured flags. They are excluded from Git and source packages. Uploaded content, downloaded model caches, and user projects are never part of the source repository; the Windows release script fetches its documented model while building the distributable.
 
 ## Recovery
 

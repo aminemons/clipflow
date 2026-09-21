@@ -16,9 +16,10 @@ This inventory covers the direct runtime and build dependencies currently declar
 | Vite and `@vitejs/plugin-react` | Frontend build | [MIT](https://github.com/vitejs/vite/blob/main/LICENSE) |
 | TypeScript | Frontend type checking | [Apache-2.0](https://github.com/microsoft/TypeScript/blob/main/LICENSE.txt) |
 | lucide-react | UI icons | [ISC](https://github.com/lucide-icons/lucide/blob/main/LICENSE) |
-| faster-whisper | Local transcription | [MIT](https://github.com/SYSTRAN/faster-whisper/blob/master/LICENSE) plus model-specific terms |
+| faster-whisper | Local transcription | [MIT](https://github.com/SYSTRAN/faster-whisper/blob/master/LICENSE) |
+| Systran faster-whisper-small | Bundled desktop speech model | [MIT model card](https://huggingface.co/Systran/faster-whisper-small) |
 
-The frontend includes a package lockfile and uses npm ci for repeatable installation. The Whisper model is a separate download; its model terms apply separately from the Python package license.
+The frontend includes a package lockfile and uses npm ci for repeatable installation. The Windows build downloads a pinned revision of the Small model and records that revision in `MODEL-SOURCE.txt`. Other Whisper models remain separate downloads and carry their own terms.
 
 Clipflow's optional Groq and Higgsfield adapters use HTTP APIs. Their accounts, credits, provider terms, and output licenses are separate from this dependency inventory. Core editing and local transcription do not require either account.
 

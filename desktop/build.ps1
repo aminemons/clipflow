@@ -24,7 +24,7 @@ Assert-UnderRepo $Work "Work path"
 Write-Host "Building Clipflow desktop from $Repo"
 & $Python -m pip install -r (Join-Path $PSScriptRoot "requirements.txt")
 if ($LASTEXITCODE) { throw "Desktop build dependencies failed to install." }
-& $Python -c "import fastapi, uvicorn, cv2, faster_whisper, yt_dlp"
+& $Python -c "import fastapi, uvicorn, cv2, curl_cffi, faster_whisper, yt_dlp"
 if ($LASTEXITCODE) {
   throw "Backend dependencies are missing. Install backend/requirements.txt in the selected Python environment before building."
 }
@@ -49,6 +49,11 @@ try {
     "--hidden-import", "backend.app",
     "--hidden-import", "backend.settings", "--hidden-import", "backend.generation",
     "--hidden-import", "backend.export_artifacts", "--collect-submodules", "backend",
+    # faster-whisper loads Silero VAD models by filename at runtime. PyInstaller
+    # sees the Python import but cannot infer these ONNX data files.
+    "--collect-all", "faster_whisper",
+    "--collect-all", "onnxruntime",
+    "--collect-all", "curl_cffi",
     "--collect-all", "yt_dlp_ejs",
     "desktop\\launcher.py"
   )
@@ -57,6 +62,9 @@ try {
 
   $Resources = Join-Path $Out "Clipflow\\resources"
   New-Item -ItemType Directory -Path $Resources -Force | Out-Null
+  $ModelDir = Join-Path $Resources "models\\small"
+  & $Python -m desktop.download_model --model small --output $ModelDir
+  if ($LASTEXITCODE) { throw "Bundled speech model download failed." }
   $node = (Get-Command node -ErrorAction SilentlyContinue).Source
   if (!$node) { throw "Node.js was not found on PATH. Install Node.js before building the desktop package." }
   $NodeDir = Join-Path $Resources "node"
@@ -89,6 +97,10 @@ try {
     $licenseText | Set-Content -LiteralPath (Join-Path $FfmpegDir "FFmpeg-LICENSE.txt") -Encoding UTF8
   }
   Copy-Item (Join-Path $PSScriptRoot "README.txt") (Join-Path $Out "Clipflow")
+  $VerifyArgs = @((Join-Path $Out "Clipflow"))
+  if ($WithoutFfmpeg) { $VerifyArgs += "--without-ffmpeg" }
+  & $Python -m desktop.verify_bundle @VerifyArgs
+  if ($LASTEXITCODE) { throw "Desktop bundle verification failed." }
   if (!$WithoutZip) {
     $Zip = Join-Path $Out "Clipflow-windows-x64.zip"
     Assert-UnderRepo $Zip "Zip path"

@@ -64,7 +64,7 @@ def classify_youtube_error(exc: BaseException, operation: str = "inspect") -> Yo
     if re.search(r"sign in to confirm|not a bot|botguard|captcha|confirm you.re a bot", text):
         return YouTubeSourceError(
             "youtube_anti_bot",
-            "YouTube blocked this request with an anti-bot check. Open the video in YouTube and retry later, or use a local video file instead. Clipflow does not read browser cookies automatically.",
+            "YouTube rejected this server connection. Retry later, use Clipflow Desktop, or upload a local copy of the video.",
             operation=operation,
             help_url=YTDLP_FAQ_URL,
             retryable=True,
@@ -154,6 +154,68 @@ def supported_qualities(info: dict[str, Any]) -> list[int]:
     return _format_heights(info)
 
 
+def _browser_retry_options(options: dict[str, Any]) -> dict[str, Any]:
+    """Use yt-dlp's supported browser transport for one bounded retry."""
+    retry = dict(options)
+    try:
+        from yt_dlp.networking.impersonate import ImpersonateTarget  # type: ignore
+
+        retry["impersonate"] = ImpersonateTarget(client="chrome")
+    except ImportError:
+        # The alternate player client is still a useful fallback in minimal
+        # installations. Release builds include the browser transport.
+        pass
+    extractor_args = dict(retry.get("extractor_args") or {})
+    extractor_args["youtube"] = {"player_client": ["web_safari"]}
+    retry["extractor_args"] = extractor_args
+    return retry
+
+
+def extract_youtube(
+    url: str,
+    *,
+    download: bool,
+    options: dict[str, Any],
+    operation: str,
+) -> dict[str, Any]:
+    """Run yt-dlp and retry one anti-bot response with its browser transport.
+
+    The retry changes the request fingerprint and YouTube player client. It
+    does not read browser cookies, use a proxy, or loop indefinitely.
+    """
+    try:
+        import yt_dlp  # type: ignore
+    except ImportError as exc:
+        raise RuntimeError("YouTube support requires yt-dlp") from exc
+
+    first_error: YouTubeSourceError | None = None
+    attempt = options
+    for index in range(2):
+        try:
+            with yt_dlp.YoutubeDL(attempt) as downloader:
+                info = downloader.extract_info(url, download=download)
+            if not isinstance(info, dict):
+                raise RuntimeError("YouTube returned no video metadata")
+            return info
+        except YouTubeSourceError:
+            raise
+        except Exception as exc:
+            classified = classify_youtube_error(exc, operation)
+            if index == 0 and classified.code == "youtube_anti_bot":
+                first_error = classified
+                attempt = _browser_retry_options(options)
+                continue
+            if first_error and classified.code == "youtube_provider_error":
+                raise first_error from exc
+            raise classified from exc
+    raise first_error or YouTubeSourceError(
+        "youtube_provider_error",
+        f"Could not {operation} the YouTube video.",
+        operation=operation,
+        retryable=True,
+    )
+
+
 def _number(value: Any, default: float = 0) -> float:
     try:
         result = float(value)
@@ -165,11 +227,6 @@ def _number(value: Any, default: float = 0) -> float:
 def probe_youtube(url: str) -> dict[str, Any]:
     """Extract safe, JSON-ready metadata without downloading the source."""
     normalized = validate_youtube_url(url)
-    try:
-        import yt_dlp  # type: ignore
-    except ImportError as exc:
-        raise RuntimeError("YouTube support requires yt-dlp") from exc
-
     opts = {
         "quiet": True,
         "no_warnings": True,
@@ -179,15 +236,12 @@ def probe_youtube(url: str) -> dict[str, Any]:
         "retries": 1,
         "js_runtimes": {"node": {}},
     }
-    try:
-        with yt_dlp.YoutubeDL(opts) as downloader:
-            info = downloader.extract_info(normalized, download=False)
-    except YouTubeSourceError:
-        raise
-    except Exception as exc:
-        raise classify_youtube_error(exc, "inspect") from exc
-    if not isinstance(info, dict):
-        raise RuntimeError("YouTube returned no video metadata")
+    info = extract_youtube(
+        normalized,
+        download=False,
+        options=opts,
+        operation="inspect",
+    )
     # noplaylist should prevent this, but an extractor can still return an
     # entries wrapper.  Refuse ambiguous data rather than importing a playlist.
     entries = info.get("entries")
