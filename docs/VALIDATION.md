@@ -6,11 +6,12 @@ for context; the latest source evidence is dated 2026-09-21.
 
 ## Automated evidence
 
-- Complete Python set: **180 passed** across three partitions on 2026-09-21. This included backend, desktop, and real-media integration tests. The only warnings were Starlette/httpx test-harness deprecations.
+- Complete Python set: **186 passed** across backend, desktop, and real-media integration tests on 2026-09-22. The two warnings were dependency test-harness deprecations.
 - Python bytecode compilation passed for `backend`, `desktop`, and `launch.py`.
 - Frontend TypeScript/Vite production build passed with 1,614 transformed modules.
 - Frontend `npm test` passed the subtitle import checks and seven clip-library regression tests, including old suggestions with conflicting review fields.
 - The integration suite under `tests/` is part of the full count and covers real video import, clip edits, framing, and exports.
+- Permanent project and clip deletion tests cover job conflicts, recovery-file removal, export cleanup, and preservation of sibling clips. A real MP4 with embedded timed subtitles verifies that automatic clipping reuses the existing text without starting a speech model.
 - Desktop release tests now reject bundles that omit the pinned Small speech model, faster-whisper's Silero VAD model, ONNX Runtime, curl-cffi, the frontend, Node.js, FFmpeg, or FFprobe.
 - YouTube tests cover metadata inspection, bounded browser-compatible retry, structured anti-bot failures, selected-quality download, cleanup, and job error contracts without making external requests.
 - `.github/workflows/ci.yml` runs the Python suite, frontend tests, and production build on pushes and pull requests.
@@ -44,7 +45,7 @@ for context; the latest source evidence is dated 2026-09-21.
 
 - The previous 2026-09-21 archive passed its self-test and demo-to-MP4 check, but it is superseded because it omitted faster-whisper's Silero VAD file. It must not be shared.
 - The updated build collects faster-whisper, ONNX Runtime, curl-cffi, and yt-dlp support files and includes a pinned multilingual Small model. `desktop/verify_bundle.py` runs before compression and stops an incomplete release.
-- A new Windows ZIP, packaged self-test, automatic-caption run, archive scan, and SHA-256 are still required on Windows. `scripts/release-windows.ps1` runs the source checks, builds the package, runs the executable self-test, and prints the new hash.
+- The 2026-09-21 Windows archive passed bundle verification and its packaged self-test. On 2026-09-22, the bundled application processed the owner's 11-minute source with the offline Small model: automatic generation completed five captioned clips, and a rendered preview completed without error. The website still served an older ZIP at the start of this check; its replacement requires separate publication and verification.
 - No live paid-provider calls or social publishing actions were performed during these checks.
 
 ## Known limits and open checks

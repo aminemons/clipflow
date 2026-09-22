@@ -42,6 +42,7 @@ from .source_probe import (
     validate_youtube_url,
 )
 from .clip_generation import GenerateInput, generate_clips
+from .embedded_subtitles import TEXT_CODECS
 from .export_artifacts import (
     finalize_exports,
     register_routes as register_export_routes,
@@ -1224,6 +1225,13 @@ def patch_project(project_id: str, body: ProjectPatch):
         return public_project(project)
 
 
+@app.delete("/api/projects/{project_id}")
+def delete_project(project_id: str):
+    """Permanently delete a project and every project-owned artifact."""
+    with submission_lock, jobs_lock, projects_lock:
+        return _delete_project_locked(project_id)
+
+
 def _cleanup_project_previews_locked(project_id: str):
     project_id = safe_identifier(project_id)
     if not store.get(project_id):
@@ -1266,6 +1274,105 @@ def _cleanup_project_previews_locked(project_id: str):
         "freed_bytes": freed_bytes,
         "removed_count": removed_count,
     }
+
+
+def _owned_file(path: Path, root: Path) -> bool:
+    """Return whether a path is a regular, non-link file under ``root``."""
+    try:
+        path.relative_to(root)
+        return path.is_file() and not path.is_symlink()
+    except (OSError, ValueError):
+        return False
+
+
+def _remove_project_media(project_id: str) -> int:
+    """Remove generated files owned by a project, returning bytes freed.
+
+    Project source files live directly under ``files`` and generated renders
+    live under ``files/<project>``.  The path checks are lexical and reject
+    links, so a malformed project cannot make permanent deletion traverse
+    outside the configured data directory.
+    """
+    root = Path(store.files).absolute()
+    project_dir = root / project_id
+    freed = 0
+
+    def unlink(path: Path) -> None:
+        nonlocal freed
+        if not _owned_file(path, root):
+            return
+        try:
+            freed += path.stat().st_size
+            path.unlink()
+        except OSError:
+            return
+
+    # Sources and thumbnails are project-scoped files.  Keep this allowlist
+    # narrow so unrelated files in the data root are never touched.
+    for path in root.glob(f"{project_id}.*"):
+        if path.suffix.lower() in {".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v", ".jpg"}:
+            unlink(path)
+    if project_dir.exists() and not project_dir.is_symlink() and project_dir.is_dir():
+        for path in sorted(project_dir.rglob("*"), key=lambda item: len(item.parts), reverse=True):
+            if path.is_dir() or path.is_symlink():
+                continue
+            # Keep individual exports for other clips when one clip is
+            # permanently removed; batch archives are invalidated below.
+            unlink(path)
+        try:
+            shutil.rmtree(project_dir)
+        except OSError:
+            pass
+    return freed
+
+
+def _remove_clip_media(project_id: str, clip_id: str) -> int:
+    """Remove renders/previews for one clip while preserving the source."""
+    root = Path(store.files).absolute()
+    project_dir = root / project_id
+    freed = 0
+    if not project_dir.exists() or project_dir.is_symlink() or not project_dir.is_dir():
+        return 0
+    for path in project_dir.rglob("*"):
+        if path.is_dir() or path.is_symlink() or not path.is_file():
+            continue
+        name = path.name
+        # Exact clip exports, preview revisions, and worker temp outputs are
+        # all generated artifacts. ZIP archives are invalidated because they
+        # may contain the deleted clip and cannot be edited safely in place.
+        matches_clip = (
+            path.stem == clip_id
+            or path.stem.startswith(f"preview-{clip_id}")
+            or path.name.startswith(f".{clip_id}.")
+        )
+        invalid_batch = path.suffix.lower() == ".zip" and (
+            path.name == f"{project_id}-clips.zip" or "exports" in path.parts
+        )
+        if matches_clip or invalid_batch:
+            try:
+                path.relative_to(root)
+                freed += path.stat().st_size
+                path.unlink()
+            except (OSError, ValueError):
+                continue
+    return freed
+
+
+def _delete_project_locked(project_id: str) -> dict[str, Any]:
+    project_id = safe_identifier(project_id)
+    if not store.get(project_id):
+        raise HTTPException(404, "project not found")
+    if _project_has_active_job(project_id):
+        raise HTTPException(409, "wait for the project job to finish before deleting")
+    with jobs_lock:
+        for job_id in [jid for jid, job in jobs.items() if job.get("project_id") == project_id]:
+            jobs.pop(job_id, None)
+            cancel_events.pop(job_id, None)
+        store.save_jobs(copy.deepcopy(jobs))
+    freed = _remove_project_media(project_id)
+    store.delete(project_id)
+    _invalidate_storage_summary()
+    return {"ok": True, "project_id": project_id, "freed_bytes": freed}
 
 
 @app.post("/api/projects/{project_id}/cleanup")
@@ -1818,17 +1925,30 @@ def add_clip(project_id: str, body: dict[str, Any]):
 
 @app.delete("/api/projects/{project_id}/clips/{clip_id}")
 def delete_clip(project_id: str, clip_id: str):
-    with projects_lock:
+    project_id = safe_identifier(project_id)
+    clip_id = safe_identifier(clip_id)
+    with submission_lock, jobs_lock, projects_lock:
         p = store.get(project_id)
         if not p:
             raise HTTPException(404, "project not found")
-        old = len(p["clips"])
-        p["clips"] = [c for c in p["clips"] if c["id"] != clip_id]
-        if len(p["clips"]) == old:
+        if _project_has_active_job(project_id):
+            raise HTTPException(409, "wait for the project job to finish before deleting clips")
+        if not any(c["id"] == clip_id for c in p["clips"]):
             raise HTTPException(404, "clip not found")
+        p["clips"] = [c for c in p["clips"] if c["id"] != clip_id]
+        # A permanently deleted clip must not be recoverable through the
+        # reversible trash record either.
+        p["clip_trash"] = [
+            entry for entry in p.get("clip_trash", [])
+            if entry.get("clip", {}).get("id") != clip_id
+        ]
+        if not p["clip_trash"]:
+            p.pop("clip_trash", None)
         p["edit_revision"] = int(p.get("edit_revision", 0)) + 1
         store.save(p)
-        return {"ok": True}
+        freed = _remove_clip_media(project_id, clip_id)
+        _invalidate_storage_summary()
+        return {"ok": True, "project_id": project_id, "clip_id": clip_id, "freed_bytes": freed}
 
 
 @app.post("/api/projects/{project_id}/clips/bulk")
@@ -1906,11 +2026,22 @@ def project_readiness(project_id: str):
         source_file = source_path(project_id)
     except HTTPException:
         return {"source_ready": False, "message": "The source video is missing. Import the video again to start a new project."}
-    has_audio = any(stream.get("codec_type") == "audio" for stream in media.probe(source_file).get("streams", []))
-    if not has_audio:
-        return {"source_ready": True, "speech": {"ready": True, "provider": "no audio track", "warning": "Automatic mode will select visual moments with captions off."}}
+    streams = media.probe(source_file).get("streams", [])
+    has_audio = any(stream.get("codec_type") == "audio" for stream in streams)
+    has_text_subtitles = any(
+        stream.get("codec_type") == "subtitle"
+        and stream.get("codec_name") in TEXT_CODECS
+        for stream in streams
+    )
     if project.get("transcript"):
         return {"source_ready": True, "speech": {"ready": True, "provider": "saved transcript", "warning": "Your corrected transcript will be reused."}}
+    if has_text_subtitles:
+        return {"source_ready": True, "speech": {
+            "ready": True, "provider": "source subtitles",
+            "warning": "Automatic mode can reuse this source's timed subtitles.",
+        }}
+    if not has_audio:
+        return {"source_ready": True, "speech": {"ready": True, "provider": "no audio track", "warning": "Automatic mode will select visual moments with captions off."}}
     provider = public_capabilities()["transcription"]
     if provider.get("provider") == "local":
         model = speech.model_readiness(source_file, {"quality": "auto"})

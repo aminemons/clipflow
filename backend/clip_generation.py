@@ -90,6 +90,7 @@ def generate_clips(api, item: dict, project_id: str, payload: dict) -> dict:
     """
     from .highlights import suggest_highlights
     from .language_models import available
+    from .embedded_subtitles import extract_text_subtitles
 
     setup = GenerateInput.model_validate(payload)
     project = api.store.get(project_id)
@@ -110,13 +111,17 @@ def generate_clips(api, item: dict, project_id: str, payload: dict) -> dict:
         transcript = cached.get("segments", [])
     needs_speech = setup.captions.mode == "auto" or (setup.mode == "smart" and setup.use_transcript)
     if needs_speech and not transcript:
-        if not any(s.get("codec_type") == "audio" for s in api.media.probe(source).get("streams", [])):
+        streams = api.media.probe(source).get("streams", [])
+        transcript = extract_text_subtitles(source, streams, api.media.FFMPEG)
+        if transcript:
+            item["warning"] = "Used the source's timed subtitles; speech transcription was unnecessary."
+        elif not any(s.get("codec_type") == "audio" for s in streams):
             if not setup.automatic:
                 raise RuntimeError("This source has no audio. Turn off speech analysis and automatic captions.")
             setup.use_transcript = False
             setup.captions.mode = "none"
             item["warning"] = "No audio track: selected visual moments with captions off."
-        else:
+        elif not transcript:
             if setup.captions.quality == "auto":
                 readiness = api.speech.model_readiness(source, speech_options)
                 if readiness.get("warning"):

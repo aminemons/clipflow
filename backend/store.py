@@ -96,6 +96,29 @@ class Store:
             project.update(upgraded)
         return project
 
+    def delete(self, project_id: str) -> bool:
+        """Permanently remove a project record and its recovery snapshots.
+
+        Media is deliberately owned by the API layer because the store does
+        not know which files belong to a project.  Removing all metadata
+        snapshots here prevents a deleted project from reappearing after a
+        restart or recovery read.
+        """
+        path = self._path(project_id)
+        removed = False
+        with self._lock:
+            for candidate in (
+                path,
+                path.with_suffix(".json.bak"),
+                path.with_suffix(".json.v1.bak"),
+            ):
+                try:
+                    candidate.unlink()
+                    removed = True
+                except FileNotFoundError:
+                    continue
+        return removed
+
     def get(self, project_id: str) -> dict[str, Any] | None:
         try:
             p = self._path(project_id)

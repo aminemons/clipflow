@@ -69,6 +69,34 @@ def test_bulk_remove_is_atomic_and_busy_safe(editor, monkeypatch):
     )
 
 
+def test_permanent_clip_delete_removes_owned_renders_but_keeps_source(editor):
+    client, store, clips = editor
+    clip = clips[0]
+    project_dir = store.files / "test"
+    project_dir.mkdir()
+    (project_dir / f"{clip['id']}.mp4").write_bytes(b"render")
+    (project_dir / f"preview-{clip['id']}-job.mp4").write_bytes(b"preview")
+    (project_dir / f"{clips[1]['id']}.mp4").write_bytes(b"other")
+    source = store.files / "test.mp4"
+    source.write_bytes(b"source")
+
+    response = client.delete(f"/api/projects/test/clips/{clip['id']}")
+    assert response.status_code == 200
+    assert store.get("test")["clips"] == [clips[1]]
+    assert not (project_dir / f"{clip['id']}.mp4").exists()
+    assert not (project_dir / f"preview-{clip['id']}-job.mp4").exists()
+    assert (project_dir / f"{clips[1]['id']}.mp4").exists()
+    assert source.read_bytes() == b"source"
+
+
+def test_permanent_clip_delete_rejects_active_job(editor, monkeypatch):
+    client, store, clips = editor
+    monkeypatch.setattr(api, "jobs", {"run": {"project_id": "test", "status": "queued"}})
+    response = client.delete(f"/api/projects/test/clips/{clips[0]['id']}")
+    assert response.status_code == 409
+    assert len(store.get("test")["clips"]) == 2
+
+
 def test_clip_speech_offsets_cache_and_corrections_are_independent(editor, monkeypatch):
     client, store, clips = editor
     calls = []

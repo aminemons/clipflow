@@ -24,6 +24,8 @@ Start with a short video file to try the complete workflow:
 
 You can also choose **Create clips automatically** after importing a source. This starts the configured analysis and creates editable suggestions. Review those suggestions before exporting.
 
+If the source already has a timed text subtitle track, automatic setup reuses it instead of running speech recognition. For captions burned into the picture, select **Video already has visible captions** before automatic clipping to avoid placing another layer of text over them. Burned-in text cannot be identified reliably from the video metadata alone.
+
 ### What runs online?
 
 The browser provides the editor. An Azure worker processes uploads, analyzes footage, transcribes audio, renders previews, and generates exports. You do not need Python, FFmpeg, or a local speech model to use the hosted workspace.
@@ -84,6 +86,8 @@ Generated clips remain editable. Give them names, adjust their start and end poi
 
 The clip open in the editor and the clips checked for export are separate selections. Keep or discard suggestions independently of either selection.
 
+Projects can be archived or permanently deleted. Removing a clip from the editor has an undo action; permanent deletion is a separate confirmed action. Deleting a project also removes its uploaded source and generated files from that workspace.
+
 ### 4. Render
 
 Save the draft, then render a preview to check the actual output.
@@ -103,9 +107,10 @@ Publishing is a separate, optional workflow. It requires configured platform acc
 - Target duration and clip-count controls.
 - Zoomable timeline and individual clip trimming.
 - Numbered, editable clip names.
-- Suggestion review, search, filters, duplication, and removal.
+- Suggestion review, search, filters, duplication, reversible removal, and permanent deletion.
 - Subject-following framing, manual positions, camera keyframes, fit, and blurred-background layouts.
 - Local transcription and optional hosted transcription.
+- Reuse of embedded timed subtitles when available, without loading the speech model.
 - Transcript correction, SRT/VTT import, and SRT download.
 - Caption fonts, styles, colors, and draggable positioning.
 - Playback speed, volume, mute, denoise, and audio fades.

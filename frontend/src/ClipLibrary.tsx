@@ -22,6 +22,7 @@ type Props = {
   onPatch: (id: string, patch: LibraryPatch) => void;
   onDuplicate: (clip: Clip) => void;
   onRemove: (ids: string[]) => void;
+  onDeletePermanent: (ids: string[]) => Promise<void>;
   onRestore: () => void;
   onAdd: () => void;
   onGenerate: () => void;
@@ -44,6 +45,9 @@ export default function ClipLibrary(props: Props) {
   const { clips, activeId, busy, saving, onPatch } = props;
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<LibraryFilter>("all");
+  const [pendingRemove, setPendingRemove] = useState<string[] | null>(null);
+  const [pendingPermanent, setPendingPermanent] = useState<string[] | null>(null);
+  const [permanentDeleting, setPermanentDeleting] = useState(false);
   const visible = clips.filter((clip) =>
     matchesLibraryFilter(clip, filter, query),
   );
@@ -54,6 +58,9 @@ export default function ClipLibrary(props: Props) {
   const pending = clips.filter((clip) =>
     matchesLibraryFilter(clip, "pending", ""),
   );
+  const requestRemove = (ids: string[]) => {
+    if (ids.length) setPendingRemove(ids);
+  };
 
   return (
     <section
@@ -239,9 +246,17 @@ export default function ClipLibrary(props: Props) {
                 <button
                   aria-label={`Remove clip ${clips.indexOf(clip) + 1}`}
                   disabled={busy || saving}
-                  onClick={() => props.onRemove([clip.id])}
+                  onClick={() => requestRemove([clip.id])}
                 >
                   <Trash2 size={14} />
+                </button>
+                <button
+                  className="permanent-delete-clip"
+                  aria-label={`Permanently delete clip ${clips.indexOf(clip) + 1}`}
+                  disabled={busy || saving}
+                  onClick={() => setPendingPermanent([clip.id])}
+                >
+                  Delete permanently
                 </button>
               </div>
             </article>
@@ -304,13 +319,20 @@ export default function ClipLibrary(props: Props) {
           </button>
           <button
             disabled={!exportIds.length || busy || saving}
-            onClick={() => props.onRemove(exportIds)}
+            onClick={() => requestRemove(exportIds)}
           >
             Remove selected
           </button>
           <button
+            className="permanent-delete-clip"
+            disabled={!exportIds.length || busy || saving}
+            onClick={() => setPendingPermanent(exportIds)}
+          >
+            Delete selected permanently
+          </button>
+          <button
             disabled={!clips.length || busy || saving}
-            onClick={() => props.onRemove(clips.map((clip) => clip.id))}
+            onClick={() => requestRemove(clips.map((clip) => clip.id))}
           >
             Clear clips
           </button>
@@ -325,6 +347,38 @@ export default function ClipLibrary(props: Props) {
           </button>
         )}
       </footer>
+      {pendingRemove && (
+        <div className="workspace-modal-backdrop" onClick={(event) => event.target === event.currentTarget && setPendingRemove(null)}>
+          <div className="workspace-dialog" role="alertdialog" aria-modal="true" aria-labelledby="remove-clips-title">
+            <h2 id="remove-clips-title">Remove {pendingRemove.length} {pendingRemove.length === 1 ? "clip" : "clips"}?</h2>
+            <p>These clips will leave the library and any export selection. You can undo this removal from the library footer.</p>
+            <footer>
+              <button type="button" className="secondary-action" onClick={() => setPendingRemove(null)}>Keep clips</button>
+              <button type="button" className="danger-action" disabled={busy || saving} onClick={() => { props.onRemove(pendingRemove); setPendingRemove(null); }}>Remove clips</button>
+            </footer>
+          </div>
+        </div>
+      )}
+      {pendingPermanent && (
+        <div className="workspace-modal-backdrop" onClick={(event) => event.target === event.currentTarget && setPendingPermanent(null)}>
+          <div className="workspace-dialog" role="alertdialog" aria-modal="true" aria-labelledby="delete-clips-title">
+            <h2 id="delete-clips-title">Permanently delete {pendingPermanent.length} {pendingPermanent.length === 1 ? "clip" : "clips"}?</h2>
+            <p>This permanently removes the selected clip data and its previews/exports. It cannot be undone and will not be restored by Undo.</p>
+            <footer>
+              <button type="button" className="secondary-action" onClick={() => setPendingPermanent(null)}>Keep clips</button>
+              <button type="button" className="danger-action" disabled={busy || saving || permanentDeleting} onClick={async () => {
+                setPermanentDeleting(true);
+                try {
+                  await props.onDeletePermanent(pendingPermanent);
+                  setPendingPermanent(null);
+                } finally {
+                  setPermanentDeleting(false);
+                }
+              }}>{permanentDeleting ? "Deleting…" : "Delete permanently"}</button>
+            </footer>
+          </div>
+        </div>
+      )}
     </section>
   );
 }

@@ -268,6 +268,7 @@ export default function ClipSetup({
       String(Math.min(30, Math.max(1, Math.round(project.duration)))),
   );
   const [error, setError] = useState("");
+  const [visibleCaptions, setVisibleCaptions] = useState(false);
   const [readiness, setReadiness] = useState<{
     source_ready: boolean;
     message?: string;
@@ -535,7 +536,11 @@ export default function ClipSetup({
         vision_provider: "local",
         camera_motion: "smooth",
       },
-      captions: { ...settings.captions, mode: "auto", quality: "auto" },
+      captions: {
+        ...settings.captions,
+        mode: visibleCaptions ? "none" : "auto",
+        quality: "auto",
+      },
     };
     setSettings(automatic);
     setError("");
@@ -667,6 +672,19 @@ export default function ClipSetup({
                   your speech settings. Starts analysis now; review and render
                   the resulting clips yourself.
                 </small>
+                <label className="clip-setup-checkline">
+                  <input
+                    type="checkbox"
+                    checked={visibleCaptions}
+                    onChange={(event) => setVisibleCaptions(event.target.checked)}
+                  />
+                  <span>
+                    Video already has visible captions
+                    <small>
+                      Keeps the original captions and avoids adding a second text layer; speech analysis still finds smart highlights.
+                    </small>
+                  </span>
+                </label>
                 {readiness?.speech && (
                   <p className="processing-readiness" role="status">
                     {readiness.speech.ready

@@ -86,6 +86,35 @@ def test_cleanup_removes_previews_only_and_rejects_unsafe_ids(monkeypatch, tmp_p
     assert client.post("/api/projects/..%5Coutside/cleanup").status_code == 400
 
 
+def test_permanent_project_delete_removes_record_media_and_jobs(monkeypatch, tmp_path):
+    store = Store(tmp_path)
+    _project(store)
+    monkeypatch.setattr(api, "store", store)
+    monkeypatch.setattr(
+        api, "jobs", {"finished": {"id": "finished", "project_id": "managed", "status": "done"}}
+    )
+    (store.files / "managed.mp4").write_bytes(b"source")
+    project_dir = store.files / "managed" / "exports" / "job1"
+    project_dir.mkdir(parents=True)
+    (project_dir / "clip.mp4").write_bytes(b"render")
+    response = TestClient(api.app).delete("/api/projects/managed")
+    assert response.status_code == 200
+    assert store.get("managed") is None
+    assert not (store.files / "managed.mp4").exists()
+    assert not (store.files / "managed").exists()
+    assert "finished" not in api.jobs
+
+
+def test_permanent_project_delete_rejects_active_job(monkeypatch, tmp_path):
+    store = Store(tmp_path)
+    _project(store)
+    monkeypatch.setattr(api, "store", store)
+    monkeypatch.setattr(api, "jobs", {"run": {"project_id": "managed", "status": "running"}})
+    response = TestClient(api.app).delete("/api/projects/managed")
+    assert response.status_code == 409
+    assert store.get("managed") is not None
+
+
 def test_storage_summary_reports_source_and_export_bytes(monkeypatch, tmp_path):
     store = Store(tmp_path)
     _project(store)

@@ -12,6 +12,7 @@ import {
   Plus,
   Search,
   Star,
+  Trash2,
   X,
 } from "lucide-react";
 import type { Job, Project } from "./editorTypes";
@@ -30,6 +31,7 @@ export default function ProjectsPage({
   onNew,
   onDemo,
   onUpdate,
+  onDelete,
   busy,
 }: {
   projects: Project[];
@@ -39,6 +41,7 @@ export default function ProjectsPage({
   onNew: () => void;
   onDemo: () => void;
   onUpdate: (id: string, changes: ProjectChanges) => Promise<void>;
+  onDelete: (id: string) => Promise<void>;
   busy: boolean;
 }) {
   const [query, setQuery] = useState("");
@@ -55,6 +58,8 @@ export default function ProjectsPage({
   const [tags, setTags] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [deleteTarget, setDeleteTarget] = useState<Project | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const dialogRef = useDialogFocus<HTMLFormElement>(!!editing);
   const visible = useMemo(
     () =>
@@ -108,6 +113,19 @@ export default function ProjectsPage({
       setError(e instanceof Error ? e.message : "Could not save project.");
     } finally {
       setSaving(false);
+    }
+  }
+  async function deleteProject() {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      await onDelete(deleteTarget.id);
+      setDeleteTarget(null);
+      setEditing(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not delete project.");
+    } finally {
+      setDeleting(false);
     }
   }
   function setView(next: "grid" | "list") {
@@ -486,7 +504,37 @@ export default function ProjectsPage({
                 {saving ? "Saving…" : "Save changes"}
               </button>
             </footer>
+            <button
+              type="button"
+              className="danger-text-action"
+              disabled={saving || deleting || busy}
+              onClick={() => setDeleteTarget(editing)}
+            >
+              <Trash2 size={15} />
+              Permanently delete project
+            </button>
           </form>
+        </div>
+      )}
+      {deleteTarget && (
+        <div
+          className="workspace-modal-backdrop"
+          onClick={(e) => e.target === e.currentTarget && !deleting && setDeleteTarget(null)}
+        >
+          <div className="workspace-dialog" role="alertdialog" aria-modal="true" aria-labelledby="delete-project-title">
+            <h2 id="delete-project-title">Permanently delete “{deleteTarget.title}”?</h2>
+            <p>
+              This permanently removes the source video, {deleteTarget.clips.length} {deleteTarget.clips.length === 1 ? "clip" : "clips"}, transcript, and exports. You cannot undo this action.
+            </p>
+            <footer>
+              <button type="button" className="secondary-action" disabled={deleting} onClick={() => setDeleteTarget(null)}>
+                Keep project
+              </button>
+              <button type="button" className="danger-action" disabled={deleting} onClick={() => void deleteProject()}>
+                {deleting ? "Deleting…" : "Delete permanently"}
+              </button>
+            </footer>
+          </div>
         </div>
       )}
     </main>

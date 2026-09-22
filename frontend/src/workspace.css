@@ -698,6 +698,26 @@
   gap: 10px;
   margin-top: 27px;
 }
+.danger-text-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 18px;
+  padding: 5px 0;
+  background: none;
+  color: #b42318;
+  font-size: 12px;
+  font-weight: 600;
+}
+.danger-action {
+  background: #b42318;
+  color: #fff;
+  border: 1px solid #b42318;
+  border-radius: 7px;
+  padding: 11px 15px;
+  font-size: 13px;
+  font-weight: 600;
+}
 .export-table {
   display: grid;
   border-top: 1px solid var(--line);

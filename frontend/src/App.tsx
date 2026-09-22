@@ -1236,6 +1236,42 @@ export default function App() {
           : "Project restored.",
       );
   }
+  async function permanentDeleteClips(ids: string[]) {
+    if (!project || !ids.length) return;
+    if (!(await flushQueuedSaves())) return;
+    let working = clips;
+    for (const id of ids) {
+      try {
+        await api(`/projects/${project.id}/clips/${id}`, { method: "DELETE" });
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Could not permanently delete clips.");
+        throw e;
+      }
+      const nextClips = working.filter((clip) => clip.id !== id);
+      working = nextClips;
+      const next = { ...project, clips: nextClips };
+      setProject(next);
+      setClips(nextClips);
+      setSelectedId((current) => current === id ? (nextClips[0]?.id ?? null) : current);
+    }
+    proofJobId.current = "";
+    setProofUrl("");
+    setNotice(`${ids.length} clip${ids.length === 1 ? "" : "s"} permanently deleted.`);
+  }
+  async function deleteProject(id: string) {
+    if (!(await flushQueuedSaves()))
+      throw new Error("Save your current changes before deleting a project.");
+    await api<void>(`/projects/${id}`, { method: "DELETE" });
+    setProjects((items) => items.filter((item) => item.id !== id));
+    if (project?.id === id) {
+      setProject(null);
+      setClips([]);
+      setSelectedId(null);
+      localStorage.removeItem("clipflow-current-project");
+      await navigatePage("projects");
+    }
+    setNotice("Project permanently deleted.");
+  }
   async function importSubtitles(file?: File) {
     if (!file || !project) return;
     try {
@@ -1312,6 +1348,7 @@ export default function App() {
             }}
             onDemo={loadDemo}
             onUpdate={updateProject}
+            onDelete={deleteProject}
             busy={isBusy || importSubmitting}
           />
         )}
@@ -2301,7 +2338,8 @@ export default function App() {
                         void updateLibraryClip(id, patch);
                       }}
                       onDuplicate={duplicateClip}
-                      onRemove={bulkDelete}
+                          onRemove={bulkDelete}
+                          onDeletePermanent={permanentDeleteClips}
                       onRestore={restoreLastBatch}
                       onAdd={addClip}
                       onGenerate={() => setShowSetup(true)}
