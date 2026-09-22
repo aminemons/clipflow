@@ -276,7 +276,7 @@ npm test
 Pop-Location
 ```
 
-The recorded source validation includes **180 passing Python tests**, frontend tests, and a production frontend build. Real-media tests exercise import, editing, rendering, captions, MP4 export, ZIP export, and persistence.
+The recorded source validation includes **188 passing Python tests**, frontend tests, and a production frontend build. Real-media tests exercise import, editing, rendering, captions, MP4 export, ZIP export, and persistence.
 
 These results do not establish that every provider, social account, or hosted workflow has been tested live. The evidence and remaining checks are recorded in [docs/VALIDATION.md](docs/VALIDATION.md).
 
