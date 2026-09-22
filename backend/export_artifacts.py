@@ -152,8 +152,18 @@ def register_routes(app: Any, store_or_accessor: Any) -> None:
     def existing(path: Path) -> Path:
         root = _files_root(store_value())
         try:
-            path.resolve().relative_to(root)
+            relative = path.relative_to(root)
         except ValueError:
+            raise HTTPException(404, "export not found")
+        # MSIX can redirect a newly written child into LocalCache even when its
+        # parent resolves to AppData. IDs were validated when path was built;
+        # check its lexical components instead of comparing resolved strings.
+        cursor = root
+        for part in relative.parts[:-1]:
+            cursor = cursor / part
+            if cursor.is_symlink():
+                raise HTTPException(404, "export not found")
+        if path.is_symlink():
             raise HTTPException(404, "export not found")
         if not path.is_file():
             raise HTTPException(404, "export not found")

@@ -61,7 +61,7 @@ def test_record_export_rejects_missing_or_traversal_paths(tmp_path):
         )
 
 
-def test_download_route_survives_edit_and_clip_removal(tmp_path):
+def test_download_route_survives_edit_and_clip_removal(tmp_path, monkeypatch):
     from fastapi import FastAPI
     from fastapi.testclient import TestClient
     from backend.export_artifacts import register_routes
@@ -77,6 +77,16 @@ def test_download_route_survives_edit_and_clip_removal(tmp_path):
     response = client.get(saved["download_url"])
     assert response.status_code == 200
     assert response.content == b"original render"
+    snapshot = export_location(store, "project", "job", "clip")
+    original_resolve = Path.resolve
+
+    def redirected_child(path, *args, **kwargs):
+        if path == snapshot:
+            return tmp_path / "redirected-local-cache" / snapshot.name
+        return original_resolve(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "resolve", redirected_child)
+    assert client.get(saved["download_url"]).content == b"original render"
     assert (
         client.get("/api/projects/project/exports/job/missing/download").status_code
         == 404

@@ -87,18 +87,6 @@ def _project_has_active_job(project_id: str) -> bool:
         )
 
 
-def _safe_file_bytes(path: Path, root: Path) -> int:
-    """Return a regular file size only when it stays inside the data root."""
-    try:
-        if path.is_symlink() or not path.is_file():
-            return 0
-        resolved = path.resolve()
-        resolved.relative_to(root)
-        return resolved.stat().st_size
-    except (OSError, ValueError):
-        return 0
-
-
 def _walk_storage(root: Path, limit: int = 20000) -> list[tuple[Path, int]]:
     """Bound the summary walk so a large local workspace cannot stall the API."""
     rows: list[tuple[Path, int]] = []
@@ -811,10 +799,10 @@ def generate_clips_job(item: dict, project_id: str, payload: dict):
 
 def _cleanup_youtube_downloads(project_id: str) -> None:
     """Remove only downloader-owned partials for this generated project ID."""
-    root = store.files.resolve()
+    root = store.files.absolute()
     for path in store.files.glob(f"{project_id}.download.*"):
         try:
-            if path.resolve().parent == root and path.is_file():
+            if path.parent == root and path.is_file() and not path.is_symlink():
                 path.unlink(missing_ok=True)
         except OSError:
             continue
@@ -1238,7 +1226,7 @@ def _cleanup_project_previews_locked(project_id: str):
         raise HTTPException(404, "project not found")
     if _project_has_active_job(project_id):
         raise HTTPException(409, "wait for the project job to finish before cleaning previews")
-    root = Path(store.files).resolve()
+    root = Path(store.files).absolute()
     project_dir = root / project_id
     try:
         project_dir.relative_to(root)
@@ -1260,10 +1248,9 @@ def _cleanup_project_previews_locked(project_id: str):
         if not (path.name.startswith("preview-") and path.suffix.lower() == ".mp4"):
             continue
         try:
-            resolved = path.resolve()
-            resolved.relative_to(project_dir)
-            size = resolved.stat().st_size
-            resolved.unlink()
+            path.relative_to(project_dir)
+            size = path.stat().st_size
+            path.unlink()
             freed_bytes += size
             removed_count += 1
         except (OSError, ValueError):

@@ -239,6 +239,11 @@ def test_export_follow_and_fit_have_portrait_video_audio_and_zip(client):
             [f"{first['title']}.mp4", f"{second['title']}.mp4"]
         )
     assert exported["download_url"].endswith("/download")
+    assert c.get(exported["download_url"]).status_code == 200
+    one_clip = wait_job(
+        c, c.post(f"/api/projects/{project_id}/export", json={"clip_ids": [ids[0]]})
+    )
+    assert c.get(one_clip["download_url"]).status_code == 200
 
 
 def test_demo_follow_render_moves_geometric_subject(client):

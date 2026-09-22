@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from fastapi.testclient import TestClient
 
 from backend import app as api
@@ -76,6 +78,14 @@ def test_cleanup_removes_previews_only_and_rejects_unsafe_ids(monkeypatch, tmp_p
     export.parent.mkdir(parents=True)
     export.write_bytes(b"export")
     client = TestClient(api.app)
+    original_resolve = Path.resolve
+
+    def redirected_preview(path, *args, **kwargs):
+        if path == preview:
+            return tmp_path / "redirected-local-cache" / preview.name
+        return original_resolve(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "resolve", redirected_preview)
 
     result = client.post("/api/projects/managed/cleanup")
     assert result.status_code == 200
@@ -84,6 +94,26 @@ def test_cleanup_removes_previews_only_and_rejects_unsafe_ids(monkeypatch, tmp_p
     assert source.read_bytes() == b"source"
     assert export.read_bytes() == b"export"
     assert client.post("/api/projects/..%5Coutside/cleanup").status_code == 400
+
+
+def test_failed_youtube_import_cleans_only_its_partial(monkeypatch, tmp_path):
+    store = Store(tmp_path)
+    monkeypatch.setattr(api, "store", store)
+    partial = store.files / "managed.download.mp4.part"
+    other = store.files / "other.download.mp4.part"
+    partial.write_bytes(b"partial")
+    other.write_bytes(b"other")
+    original_resolve = Path.resolve
+
+    def redirected_partial(path, *args, **kwargs):
+        if path == partial:
+            return tmp_path / "redirected-local-cache" / partial.name
+        return original_resolve(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "resolve", redirected_partial)
+    api._cleanup_youtube_downloads("managed")
+    assert not partial.exists()
+    assert other.read_bytes() == b"other"
 
 
 def test_permanent_project_delete_removes_record_media_and_jobs(monkeypatch, tmp_path):
