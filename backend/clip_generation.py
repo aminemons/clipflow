@@ -111,6 +111,7 @@ def generate_clips(api, item: dict, project_id: str, payload: dict) -> dict:
         transcript = cached.get("segments", [])
     needs_speech = setup.captions.mode == "auto" or (setup.mode == "smart" and setup.use_transcript)
     if needs_speech and not transcript:
+        speech_fallback_warning = None
         streams = api.media.probe(source).get("streams", [])
         transcript = extract_text_subtitles(source, streams, api.media.FFMPEG)
         if transcript:
@@ -131,15 +132,28 @@ def generate_clips(api, item: dict, project_id: str, payload: dict) -> dict:
                     lambda stage, percent: api.update(item, stage, int(percent * .5)),
                     speech_options)
             except RuntimeError as error:
-                if not setup.automatic or not str(error).startswith("No speech was detected"):
+                message = str(error)
+                if not setup.automatic or not (
+                    message.startswith("No speech was detected")
+                    or message.startswith("Local Whisper ran out of memory")
+                ):
                     raise
                 transcript = []
+                if message.startswith("Local Whisper ran out of memory"):
+                    speech_fallback_warning = (
+                        "Local Whisper ran out of memory: selected visual moments with captions off. "
+                        "Close other apps and retry transcription separately.")
         if not transcript and not setup.automatic:
             raise RuntimeError("No speech was recognized. Check the language or choose manual captions.")
         if not transcript and setup.automatic:
             setup.use_transcript = False
             setup.captions.mode = "none"
-            item.setdefault("warning", "No speech was recognized: selected visual moments with captions off.")
+            if speech_fallback_warning:
+                item["warning"] = speech_fallback_warning
+            else:
+                item.setdefault(
+                    "warning", "No speech was recognized: selected visual moments with captions off."
+                )
     progress = lambda stage, percent: api.update(item, stage, 50 + int(percent * .4))
     if setup.mode == "smart":
         suggestions = suggest_highlights(source, transcript if setup.use_transcript else [],

@@ -96,20 +96,17 @@ export default function WorkspaceNav({
         </div>
       )}
       <div className="nav-bottom">
-        <button
-          disabled={!desktopReady}
-          title={
-            desktopReady
-              ? "Download Windows desktop app · unzip and run Clipflow.exe"
-              : "Desktop release is not built on this server"
-          }
-          onClick={() => {
-            window.location.href = "/api/desktop/download";
-          }}
-        >
-          <Download size={18} />
-          <span>Download desktop</span>
-        </button>
+        {desktopReady && (
+          <button
+            title="Download Windows desktop app · unzip and run Clipflow.exe"
+            onClick={() => {
+              window.location.href = "/api/desktop/download";
+            }}
+          >
+            <Download size={18} />
+            <span>Download desktop</span>
+          </button>
+        )}
         <button onClick={onTour} title="Take a guided tour">
           <HelpCircle size={18} />
           <span>Take a tour</span>

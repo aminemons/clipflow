@@ -6,12 +6,7 @@ Clipflow was built for a full-stack developer assessment. The core workflow uses
 
 ## Try the hosted version
 
-Open **[Clipflow](https://clipflow-aminemons.vercel.app)** and sign in with the account provided for this assessment:
-
-- **Email:** `boubasala2009@gmail.com`
-- **Password:** `Akatest123`
-
-This is a shared owner workspace. Projects, settings, and connected accounts are shared between people using this login. These credentials are intended for private assessment access.
+Open **[Clipflow](https://clipflow-aminemons.vercel.app)** with credentials supplied privately by the project owner. This is a shared assessment workspace; projects and settings are visible to everyone using that login. The local application does not require an account.
 
 Start with a short video file to try the complete workflow:
 
@@ -55,6 +50,8 @@ Projects, exports, models, and settings are stored under:
 ### Offline or connected
 
 For offline use, upload a local video and keep transcription, highlight selection, and camera analysis set to their local options. The updated Windows package includes the multilingual Whisper Small model.
+
+Automatic clipping first reuses a saved transcript or timed subtitles in the source. If local speech recognition runs out of memory, it still offers visual clips with new captions turned off and explains why; retry transcription later when memory is available. Explicit transcription requests report the error instead of changing your chosen model.
 
 Internet access is needed for YouTube imports, additional model downloads, external AI providers, and social publishing.
 

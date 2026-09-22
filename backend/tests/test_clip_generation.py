@@ -141,3 +141,34 @@ def test_automatic_silent_source_produces_visual_clips_without_captions(monkeypa
     assert clip["caption_enabled"] is False
     assert clip["transcript"] == []
     assert "No audio" in job["warning"]
+
+
+def test_automatic_whisper_oom_falls_back_but_explicit_transcription_fails(monkeypatch, tmp_path):
+    store, project = _runtime(monkeypatch, tmp_path)
+    _suggestion(monkeypatch, expected_transcript=[])
+    monkeypatch.setattr(app.media, "probe", lambda _: {"streams": [
+        {"codec_type": "video"}, {"codec_type": "audio"}]})
+
+    def out_of_memory(*args, **kwargs):
+        raise RuntimeError("Local Whisper ran out of memory. Close other apps and retry.")
+
+    monkeypatch.setattr(app.speech, "transcribe", out_of_memory)
+    monkeypatch.setattr(app.speech, "model_readiness", lambda *_: {"warning": "Using a cached model."})
+    job = {"id": "oom-auto"}
+    generate_clips(app, job, project["id"], {
+        "automatic": True, "mode": "smart", "target_duration": 5,
+        "max_clips": 1, "use_transcript": True,
+        "captions": {"mode": "auto", "quality": "auto"},
+    })
+
+    clip = store.get(project["id"])["clips"][-1]
+    assert clip["caption_enabled"] is False
+    assert clip["transcript"] == []
+    assert "out of memory" in job["warning"]
+    assert "captions off" in job["warning"]
+
+    with pytest.raises(RuntimeError, match="Local Whisper ran out of memory"):
+        generate_clips(app, {"id": "oom-explicit"}, project["id"], {
+            "mode": "smart", "target_duration": 5, "max_clips": 1,
+            "use_transcript": True, "captions": {"mode": "auto"},
+        })
