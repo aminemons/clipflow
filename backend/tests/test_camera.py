@@ -50,6 +50,18 @@ def test_camera_point_zoom_is_used_without_an_explicit_zoom_override():
     assert point.zoom > 1.0
 
 
+def test_camera_settles_at_target_without_pan_or_zoom_overshoot():
+    controller = CameraController("dynamic", dead_zone=0)
+    points = [
+        controller.update(CameraPoint(0.8, 0.5, 1.4), 1 / 30)
+        for _ in range(240)
+    ]
+
+    assert all(point.x <= 0.8 and point.zoom <= 1.4 for point in points)
+    assert abs(points[-1].x - 0.8) < 1e-6
+    assert abs(points[-1].zoom - 1.4) < 1e-6
+
+
 def test_face_auto_zoom_is_capped_by_user_ceiling_and_safe_without_face():
     # A 10% source-height face would need 3x to occupy 30%, but the user's
     # 1.4x ceiling remains authoritative.

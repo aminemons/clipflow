@@ -1,4 +1,8 @@
+from array import array
+import math
+import shutil
 from pathlib import Path
+import wave
 
 import httpx
 import pytest
@@ -65,6 +69,74 @@ def test_local_score_prefers_clip_near_requested_duration():
         candidate["target"] = 4.0
     ranked = highlights._rank_candidates(candidates, "useful")
     assert ranked[0]["id"] == 0
+
+
+def test_local_ranking_is_unchanged_when_audio_analysis_is_unavailable():
+    candidates = [
+        {"id": 0, "start": 0.0, "end": 4.0, "duration": 4.0,
+         "target": 4.0, "text": "same useful passage", "density": 1.0, "info": 0.5},
+        {"id": 1, "start": 8.0, "end": 12.0, "duration": 4.0,
+         "target": 4.0, "text": "same useful passage", "density": 1.0, "info": 0.5},
+    ]
+
+    default = highlights._rank_candidates([dict(row) for row in candidates], "useful")
+    unavailable = highlights._rank_candidates(
+        [dict(row) for row in candidates], "useful", audio_dynamics=None
+    )
+
+    assert [(row["id"], row["score"]) for row in default] == [
+        (row["id"], row["score"]) for row in unavailable
+    ]
+    assert all("audio_dynamics" not in row for row in unavailable)
+
+
+def test_audio_dynamics_is_bounded_to_a_small_tiebreaker():
+    candidates = [
+        {"id": 0, "start": 0.0, "end": 4.0, "duration": 4.0,
+         "target": 4.0, "text": "same useful passage", "density": 1.0, "info": 0.5},
+    ]
+    baseline = highlights._rank_candidates([dict(row) for row in candidates], "useful")[0]
+    boosted = highlights._rank_candidates(
+        [dict(row) for row in candidates], "useful", audio_dynamics={0: 1.0}
+    )[0]
+
+    assert boosted["audio_dynamics"] == 1.0
+    assert 0 <= boosted["score"] - baseline["score"] <= 0.0201
+
+
+def test_audio_dynamics_decodes_synthetic_audio_and_ignores_music_only_window(tmp_path):
+    if not shutil.which(highlights.media.FFMPEG) and not Path(highlights.media.FFMPEG).exists():
+        pytest.skip("FFmpeg is unavailable")
+    source = tmp_path / "dynamics.wav"
+    sample_rate = 8000
+    samples = []
+    for index in range(sample_rate * 4):
+        block = index // 1600
+        if block < 10:
+            amplitude = 0.03 if block % 2 == 0 else 0.30
+        else:
+            amplitude = 0.10
+        samples.append(
+            int(32767 * amplitude * math.sin(2 * math.pi * 220 * index / sample_rate))
+        )
+    with wave.open(str(source), "wb") as audio:
+        audio.setnchannels(1)
+        audio.setsampwidth(2)
+        audio.setframerate(sample_rate)
+        audio.writeframes(array("h", samples).tobytes())
+
+    candidates = [
+        {"id": 0, "start": 0.0, "end": 2.0, "text": "spoken passage", "density": 0.8},
+        {"id": 1, "start": 2.0, "end": 4.0, "text": "spoken passage", "density": 0.8},
+        {"id": 2, "start": 2.0, "end": 4.0, "text": "", "density": 0.0},
+    ]
+
+    scores = highlights._audio_dynamics(source, 4.0, candidates)
+
+    assert scores is not None
+    assert 0.0 <= scores[0] <= 1.0
+    assert scores[0] > scores[1]
+    assert scores[2] == 0.0
 
 
 def test_local_novelty_does_not_depend_on_candidate_iteration_order():

@@ -1,4 +1,5 @@
 from backend.media import srt_for_clip
+from backend.caption_layout import word_caption_cues
 
 
 def test_word_timing_keeps_captions_on_speech_and_respects_clip_edges():
@@ -68,3 +69,37 @@ def test_word_cues_scale_with_playback_speed():
     clip = {"start": 10, "end": 12, "playback_speed": 2}
     assert "00:00:00,100 --> 00:00:00,600" in srt_for_clip(clip, transcript)
     assert "00:00:00,200 --> 00:00:01,200" in srt_for_clip(clip, transcript, for_render=True)
+
+
+def test_aligned_caption_cues_split_long_phrases_at_character_limit():
+    words = ["These", "are", "several", "ordinary", "words", "that", "should", "wrap", "before", "the", "caption", "gets", "too", "long."]
+    timed = [
+        {"start": index * 0.25, "end": index * 0.25 + 0.2, "text": word}
+        for index, word in enumerate(words)
+    ]
+    cues = word_caption_cues(
+        {"text": " ".join(words), "words": timed}, 0, 10
+    )
+
+    assert len(cues) > 1
+    assert all(len(text) <= 42 for _start, _end, text in cues)
+    assert [word for _start, _end, text in cues for word in text.split()] == words
+    assert cues[0][0] == timed[0]["start"]
+    assert cues[-1][1] == timed[-1]["end"]
+
+
+def test_aligned_arabic_caption_cues_respect_character_limit_and_punctuation():
+    words = ["هذه", "عبارة", "عربية", "طويلة", "بكلمات", "متعددة،", "ثم", "تستمر", "بشكل", "طبيعي."]
+    timed = [
+        {"start": index * 0.3, "end": index * 0.3 + 0.24, "text": word}
+        for index, word in enumerate(words)
+    ]
+    cues = word_caption_cues(
+        {"text": " ".join(words), "words": timed}, 0, 10
+    )
+
+    assert len(cues) > 1
+    assert all(len(text) <= 42 for _start, _end, text in cues)
+    assert cues[0][2].endswith("،")
+    assert cues[0][0] == timed[0]["start"]
+    assert cues[-1][1] == timed[-1]["end"]

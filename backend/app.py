@@ -49,6 +49,7 @@ from .export_artifacts import (
     finalize_exports,
     register_routes as register_export_routes,
 )
+from .nle_export import stream_package as stream_nle_package
 
 ROOT = Path(__file__).resolve().parent.parent
 DATA = Path(os.getenv("CLIPFLOW_DATA", str(ROOT / "data")))
@@ -2275,6 +2276,46 @@ def export(project_id: str, body: ExportInput):
     return submit(project_id, export_job, project_id,
                   [clip["id"] for clip in selected],
                   {clip["id"]: clip.get("revision", 1) for clip in selected})
+
+
+@app.get("/api/projects/{project_id}/edit-package")
+def edit_package(project_id: str, clip_ids: str | None = None):
+    project_id = safe_identifier(project_id)
+    project = store.get(project_id)
+    if not project:
+        raise HTTPException(404, "project not found")
+    requested = []
+    if clip_ids:
+        requested = [safe_identifier(value.strip()) for value in clip_ids.split(",") if value.strip()]
+        if len(requested) != len(set(requested)):
+            raise HTTPException(400, "Clip identifiers must be unique.")
+    selected = [
+        clip for clip in project.get("clips", [])
+        if (clip.get("id") in requested if requested else clip.get("selected", True))
+    ]
+    if requested and {clip.get("id") for clip in selected} != set(requested):
+        raise HTTPException(404, "clip not found")
+    if not selected:
+        raise HTTPException(400, "Choose at least one clip for the Adobe handoff.")
+    source = source_path(project_id)
+    source_info = media.probe(source)
+    has_audio = any(
+        stream.get("codec_type") == "audio"
+        for stream in source_info.get("streams", [])
+    )
+    try:
+        package_stream = stream_nle_package(
+            project, selected, source, has_audio=has_audio
+        )
+    except (ValueError, FileNotFoundError) as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return StreamingResponse(
+        package_stream,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="{project_id}-adobe-handoff.zip"'
+        },
+    )
 
 
 @app.post("/api/projects/{project_id}/preview")

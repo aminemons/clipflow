@@ -27,6 +27,7 @@ type Props = {
   onAdd: () => void;
   onGenerate: () => void;
   onExport: (ids: string[]) => void;
+  onAdobeExport: (ids: string[]) => void;
 };
 
 const filters: { id: LibraryFilter; label: string }[] = [
@@ -316,6 +317,13 @@ export default function ClipLibrary(props: Props) {
         <div className="library-footer-actions">
           <button disabled={busy} onClick={props.onGenerate}>
             Generate more
+          </button>
+          <button
+            disabled={!exportIds.length || busy || saving}
+            title="Download selected clips as an editable Adobe handoff"
+            onClick={() => props.onAdobeExport(exportIds)}
+          >
+            Adobe edit package
           </button>
           <button
             disabled={!exportIds.length || busy || saving}

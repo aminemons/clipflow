@@ -297,6 +297,12 @@ class CameraController:
             max_delta = acceleration * dt
             velocity = self._velocity[index] + clamp(goal_velocity - self._velocity[index], -max_delta, max_delta)
             value = now + velocity * dt
+            # Acceleration can otherwise carry the camera past a target after it
+            # has built up speed, forcing a visible reversal on the next frames.
+            # Settle exactly at the current goal when this step would cross it.
+            if (want - now) * (want - value) <= 0:
+                value = want
+                velocity = 0.0
             self._velocity[index] = velocity
             next_values.append(value)
         self.point = CameraPoint(*next_values).bounded()

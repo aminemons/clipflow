@@ -1238,6 +1238,17 @@ export default function App() {
           : "Project restored.",
       );
   }
+  async function exportAdobePackage(ids: string[]) {
+    if (!project || !ids.length || isBusy) return;
+    if (!(await flushQueuedSaves())) return;
+    const query = encodeURIComponent(ids.join(","));
+    const link = document.createElement("a");
+    link.href = `${API}/projects/${encodeURIComponent(project.id)}/edit-package?clip_ids=${query}`;
+    link.download = `${project.id}-adobe-handoff.zip`;
+    document.body.append(link);
+    link.click();
+    link.remove();
+  }
   async function permanentDeleteClips(ids: string[]) {
     if (!project || !ids.length) return;
     if (!(await flushQueuedSaves())) return;
@@ -2182,6 +2193,14 @@ export default function App() {
                       >
                         <Download size={14} /> Export current
                       </button>
+                      <button
+                        className="tool-button"
+                        disabled={!selected || isBusy}
+                        title="Save settings first, then download an editable Premiere timeline and After Effects script"
+                        onClick={() => selected && void exportAdobePackage([selected.id])}
+                      >
+                        <Layers3 size={14} /> Adobe edit package
+                      </button>
                     </div>
                     <PreviewPlayer
                       project={project}
@@ -2346,6 +2365,7 @@ export default function App() {
                       onAdd={addClip}
                       onGenerate={() => setShowSetup(true)}
                       onExport={exportClips}
+                      onAdobeExport={exportAdobePackage}
                     />
                   )}
                   {sidebar === "transcript" && (

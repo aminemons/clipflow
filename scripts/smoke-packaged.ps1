@@ -24,6 +24,7 @@ if (!$tempFull.StartsWith($runnerTemp, [StringComparison]::OrdinalIgnoreCase)) {
 }
 $source = Join-Path $temp "synthetic.mp4"
 $output = Join-Path $temp "export.mp4"
+$handoff = Join-Path $temp "adobe-handoff.zip"
 $port = Get-Random -Minimum 18000 -Maximum 28000
 $previousLocalAppData = $env:LOCALAPPDATA
 $previousNoDialog = $env:CLIPFLOW_NO_DIALOG
@@ -86,7 +87,27 @@ try {
   if ($video.codec_name -ne "h264" -or $video.width -ne 720 -or $video.height -ne 1280) {
     throw "Export is not playable H.264 720x1280 (got $($video.codec_name) $($video.width)x$($video.height))."
   }
-  Write-Host "Fresh-package smoke passed: automatic speech generation completed (observed stages: $joinedStages); export $($video.codec_name) $($video.width)x$($video.height)."
+  Invoke-WebRequest -Uri "$api/api/projects/$($upload.project_id)/edit-package?clip_ids=$($clip.id)" -OutFile $handoff -TimeoutSec 60
+  Add-Type -AssemblyName System.IO.Compression.ZipFile
+  $archive = [System.IO.Compression.ZipFile]::OpenRead($handoff)
+  try {
+    $names = @($archive.Entries | ForEach-Object FullName)
+    foreach ($expected in @("Premiere.xml", "after-effects.jsx", "captions.srt", "manifest.json", "README.txt", "media/synthetic.mp4")) {
+      if ($expected -notin $names) { throw "Adobe edit package is missing $expected." }
+    }
+    if (@($names | Where-Object { $_ -eq "media/synthetic.mp4" }).Count -ne 1) {
+      throw "Adobe edit package must include the source exactly once."
+    }
+    $xmlStream = $archive.GetEntry("Premiere.xml").Open()
+    try {
+      $reader = [IO.StreamReader]::new($xmlStream)
+      try { [xml]$timeline = $reader.ReadToEnd() } finally { $reader.Dispose() }
+    } finally { $xmlStream.Dispose() }
+    if ($timeline.xmeml.sequence.media.video.track.clipitem.Count -ne 1) {
+      throw "Adobe edit package did not contain the selected clip timeline."
+    }
+  } finally { $archive.Dispose() }
+  Write-Host "Fresh-package smoke passed: automatic speech generation completed (observed stages: $joinedStages); export $($video.codec_name) $($video.width)x$($video.height); editable handoff ZIP verified."
 } finally {
   if ($process -and !$process.HasExited) {
     Stop-Process -Id $process.Id -Force

@@ -110,9 +110,15 @@ Source playback is a quick editing view. The rendered preview applies the export
 
 ### 5. Export or publish
 
-Download the current clip as an MP4 or export several selected clips as a ZIP.
+Download the current clip as an MP4 or export several selected clips as a ZIP. For post-production, download an **Adobe edit package** for the current clip or selected clips.
 
 Publishing is a separate, optional workflow. It requires configured platform accounts and explicit approval of the clips and destinations.
+
+### Editable Adobe handoff
+
+The Adobe edit package is a ZIP containing the source media, a Premiere Pro FCP7 XML timeline, an After Effects JSX script, an SRT subtitle file, and a manifest with clip settings. Save edits before exporting. Extract the whole ZIP so the timeline and script can find the media. In Premiere Pro, import the XML project. In After Effects, run the JSX with **File → Scripts → Run Script File**; it creates and saves an `.aep` project beside the script. Keep the extracted `media` folder with the Adobe project when moving it.
+
+This is an editable starting point, not a pixel-identical transfer of Clipflow renders. The XML and script carry clip timing, vertical sequence dimensions, and supported caption text. Smart camera movement, tracking, and Clipflow-specific render effects are not translated; use the rendered MP4 as a visual reference and adjust the Adobe project as needed. Adobe applications were not installed in the validation environment, so import and script execution have not been verified here.
 
 ## Features
 
@@ -129,7 +135,7 @@ Publishing is a separate, optional workflow. It requires configured platform acc
 - Transcript correction, SRT/VTT import, and SRT download.
 - Caption fonts, styles, colors, and draggable positioning.
 - Playback speed, volume, mute, denoise, and audio fades.
-- Rendered previews, individual exports, and batch downloads.
+- Rendered previews, individual exports, batch downloads, and an editable Premiere Pro / After Effects handoff.
 - Saved projects and visible background-job progress.
 - A guided tour covering setup, editing, review, and export.
 
@@ -295,7 +301,7 @@ npm test
 Pop-Location
 ```
 
-The current Python suite passes **237 tests**; frontend tests and the production build pass. The hosted editor and Azure worker include desktop-assisted YouTube import. A live test signed in, issued a one-use ticket, downloaded a public YouTube video on a local PC, uploaded it to Azure, reached a source-ready project, and removed that test project. An earlier hosted smoke check covered clip generation, preview, and export.
+The current Python suite passes **250 tests**; frontend tests and the production build pass. The hosted editor and Azure worker include desktop-assisted YouTube import. A live test signed in, issued a one-use ticket, downloaded a public YouTube video on a local PC, uploaded it to Azure, reached a source-ready project, and removed that test project. An earlier hosted smoke check covered clip generation, preview, and export.
 
 [Windows release workflow 35907285265](https://github.com/aminemons/clipflow/actions/runs/35907285265) passed on revision `267e9d3`: it extracted the package, checked protocol registration, loaded the offline speech runtime, generated a Smart clip, and exported H.264 video. The [release ZIP](https://github.com/aminemons/clipflow/releases/tag/desktop-267e9d3a6e173881bc2a34a1a22602a4992b2541) is 852,976,162 bytes with SHA-256 `4eb6c0ef0aa369b3ccf031debbcab4ddf9a817a669795708014f59012b699817`. These checks do not establish that every external provider or social account works live. See [docs/VALIDATION.md](docs/VALIDATION.md) for evidence and limits.
 

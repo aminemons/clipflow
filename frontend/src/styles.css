@@ -564,13 +564,15 @@ a svg {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+  flex-wrap: wrap;
   width: 100%;
   margin: 0 0 18px;
 }
-.current-clip-strip > div {
+.current-clip-strip > div:first-child {
   display: flex;
   gap: 7px;
   flex-direction: column;
+  flex: 1 1 180px;
   min-width: 0;
 }
 .current-clip-strip strong {

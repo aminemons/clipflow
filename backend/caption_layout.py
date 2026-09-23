@@ -28,7 +28,13 @@ def caption_cues(start: float, end: float, text: str, words_per_cue: int = 6):
             for offset in range(0, len(words), words_per_cue)]
 
 
-def word_caption_cues(segment: dict, start: float, end: float, words_per_cue: int = 6):
+def word_caption_cues(
+    segment: dict,
+    start: float,
+    end: float,
+    words_per_cue: int = 6,
+    max_chars: int = 42,
+):
     """Use word timing only while it still matches the editable segment text.
 
     Transcript corrections change ``text`` without realigning ``words``. In that
@@ -61,12 +67,28 @@ def word_caption_cues(segment: dict, start: float, end: float, words_per_cue: in
     visible = [word for word in words if word[1] > start and word[0] < end]
     cues = []
     batch = []
+
+    def emit(items):
+        if not items:
+            return
+        a, b = max(start, items[0][0]), min(end, items[-1][1])
+        if b > a:
+            cues.append((a, b, joined(items)))
+
     for index, word in enumerate(visible):
+        proposed = joined([*batch, word])
+        # Keep a single long word intact, but start a new cue before adding a
+        # word that would make an otherwise multiword cue exceed the cap.
+        if batch and (len(batch) >= words_per_cue or len(proposed) > max_chars):
+            emit(batch)
+            batch = []
         batch.append(word)
         next_gap = visible[index + 1][0] - word[1] if index + 1 < len(visible) else 0
-        if len(batch) >= words_per_cue or next_gap > 0.6 or re.search(r"[.!?؟]$", word[2]) or index == len(visible) - 1:
-            a, b = max(start, batch[0][0]), min(end, batch[-1][1])
-            if b > a:
-                cues.append((a, b, joined(batch)))
+        if (
+            next_gap > 0.6
+            or re.search(r"[.!?؟،؛,:;]$", word[2])
+            or index == len(visible) - 1
+        ):
+            emit(batch)
             batch = []
     return cues

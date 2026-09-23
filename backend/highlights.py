@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import math
 import re
+import subprocess
 import unicodedata
 from collections import Counter
 from pathlib import Path
@@ -376,8 +377,127 @@ def _candidate_windows(
     return candidates
 
 
+def _audio_dynamics(
+    source: Path,
+    duration: float,
+    candidates: list[dict[str, Any]],
+    progress: Progress | None = None,
+) -> dict[int, float] | None:
+    """Measure source-relative audio envelope variation in transcript-backed windows.
+
+    FFmpeg streams low-rate mono PCM in bounded reads. Only one RMS value per
+    200ms block is retained. The feature measures variation, not loudness, and
+    is gated by transcript coverage so music-only windows are not candidates for
+    a positive contribution. It is a weak tie-breaker, not a speech or highlight
+    detector.
+    """
+    if duration <= 0 or not candidates or not any(
+        candidate.get("text", "").strip()
+        and float(candidate.get("density", 0.0)) >= 0.5
+        for candidate in candidates
+    ):
+        return None
+    try:
+        import numpy as np  # type: ignore
+    except Exception:
+        return None
+
+    sample_rate = 8000
+    block_samples = 1600  # 200 ms
+    block_bytes = block_samples * 2
+    command = [
+        media.FFMPEG, "-nostdin", "-v", "error", "-i", str(source), "-vn",
+        "-ac", "1", "-ar", str(sample_rate), "-f", "s16le", "pipe:1",
+    ]
+    try:
+        process = subprocess.Popen(
+            command, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL
+        )
+    except Exception:
+        return None
+    levels: list[float] = []
+    pending = b""
+    expected_blocks = min(
+        1_080_000,
+        int(math.ceil(duration * sample_rate / block_samples)) + 1,
+    )
+    capped = False
+    try:
+        if process.stdout is None:
+            process.kill()
+            process.wait(timeout=5)
+            return None
+        while len(levels) < expected_blocks:
+            _cancel(progress, "highlights", 66)
+            media._check_cancel()
+            chunk = process.stdout.read(8192)
+            if not chunk:
+                break
+            pending += chunk
+            full_bytes = len(pending) // block_bytes * block_bytes
+            if not full_bytes:
+                continue
+            complete, pending = pending[:full_bytes], pending[full_bytes:]
+            samples = np.frombuffer(complete, dtype="<i2").reshape(-1, block_samples)
+            rms = np.sqrt(
+                np.mean(np.square(samples.astype(np.float32) / 32768.0), axis=1)
+            )
+            levels.extend(np.log(rms + 1e-5).astype(float).tolist())
+        # Decoding completed only when EOF was observed. When the duration cap
+        # was reached, terminate ffmpeg and treat the captured prefix as valid.
+        if process.poll() is None:
+            capped = True
+            process.kill()
+        return_code = process.wait(timeout=5)
+    except BaseException:
+        if process.poll() is None:
+            process.kill()
+        try:
+            process.wait(timeout=5)
+        except Exception:
+            pass
+        raise
+    finally:
+        if process.stdout:
+            process.stdout.close()
+    if not levels:
+        return None
+    if return_code and not capped:
+        return None
+
+    envelope = np.asarray(levels, dtype=np.float32)
+    center = float(np.median(envelope))
+    spread = float(np.median(np.abs(envelope - center)))
+    # Normalize to the source's own level distribution. The floor prevents
+    # near-constant audio from magnifying codec noise into a useful signal.
+    scale = max(0.15, 1.4826 * spread)
+    normalized = np.clip((envelope - center) / scale, -4.0, 4.0)
+    step = block_samples / sample_rate
+    result: dict[int, float] = {}
+    for candidate in candidates:
+        if (
+            not candidate.get("text", "").strip()
+            or float(candidate.get("density", 0.0)) < 0.5
+        ):
+            result[int(candidate["id"])] = 0.0
+            continue
+        first = max(0, int(float(candidate["start"]) / step))
+        last = min(len(normalized), int(math.ceil(float(candidate["end"]) / step)))
+        values = normalized[first:last]
+        if len(values) < 5:
+            result[int(candidate["id"])] = 0.0
+            continue
+        # Central 80% range ignores isolated peaks. Cap at 1; this feature later
+        # receives at most 0.02 of the normalized local score.
+        dynamic_range = float(np.quantile(values, 0.9) - np.quantile(values, 0.1))
+        result[int(candidate["id"])] = max(0.0, min(1.0, dynamic_range / 6.0))
+    return result
+
+
 def _rank_candidates(
-    candidates: list[dict[str, Any]], topic: str
+    candidates: list[dict[str, Any]],
+    topic: str,
+    audio_dynamics: dict[int, float] | None = None,
 ) -> list[dict[str, Any]]:
     terms = _topic_terms(topic)
     token_sets = [set(_words(candidate["text"])) for candidate in candidates]
@@ -409,8 +529,7 @@ def _rank_candidates(
         candidate["duration_fit"] = duration_fit
         # Topic/relevance dominates; speech and lexical variety make silent or
         # repetitive intervals naturally rank below useful passages.
-        candidate["score"] = round(
-            max(
+        base_score = max(
                 0.0,
                 0.42 * candidate["topic"]
                 + 0.22 * candidate["density"]
@@ -418,9 +537,23 @@ def _rank_candidates(
                 + 0.10 * candidate["novelty"]
                 + 0.06 * duration_fit
                 - (0.25 if candidate.get("complete") is False else 0.0),
-            ),
-            4,
-        )
+            )
+        if audio_dynamics is None:
+            # Keep historical ranking and score byte-for-byte in the no-audio path.
+            candidate.pop("audio_dynamics", None)
+            candidate["score"] = round(base_score, 4)
+        else:
+            try:
+                acoustic = float(audio_dynamics.get(int(candidate["id"]), 0.0))
+            except (TypeError, ValueError):
+                acoustic = 0.0
+            if not math.isfinite(acoustic):
+                acoustic = 0.0
+            acoustic = max(0.0, min(1.0, acoustic))
+            candidate["audio_dynamics"] = acoustic
+            candidate["score"] = round(
+                min(1.0, base_score + 0.02 * acoustic), 4
+            )
     return sorted(candidates, key=lambda x: (-x["score"], x["start"]))
 
 
@@ -430,13 +563,16 @@ def _overlap(a: dict[str, Any], b: dict[str, Any]) -> float:
 
 
 def _select(
-    candidates: list[dict[str, Any]], max_clips: int, topic: str
+    candidates: list[dict[str, Any]],
+    max_clips: int,
+    topic: str,
+    audio_dynamics: dict[int, float] | None = None,
 ) -> list[dict[str, Any]]:
     try:
         limit = max(0, int(max_clips))
     except (TypeError, ValueError):
         limit = 0
-    ranked = _rank_candidates(candidates, topic)
+    ranked = _rank_candidates(candidates, topic, audio_dynamics)
     # Duration fit gives silent candidates a nonzero score, so a score cutoff
     # cannot identify a missing transcript. Sample the full timeline instead.
     if ranked and not any(c["text"].strip() for c in ranked):
@@ -753,14 +889,25 @@ def suggest_highlights(
         return []
     for candidate in candidates:
         candidate["target"] = desired
+    duration = _duration(source, rows)
+    audio_dynamics = None
+    if provider_name == "local":
+        try:
+            audio_dynamics = _audio_dynamics(source, duration, candidates, progress)
+        except Exception as exc:
+            if _is_cancelled(exc):
+                raise
+            # Optional local analysis never blocks transcript-based selection.
+            audio_dynamics = None
     selected = (
         _hosted_rank(candidates, topic, max_clips, progress)
         if provider_name == "groq"
         else _model_rank(candidates, topic, max_clips, provider_name, progress)
-        if provider_name != "local" else _select(candidates, max_clips, topic)
+        if provider_name != "local" else _select(
+            candidates, max_clips, topic, audio_dynamics
+        )
     )
     result = []
-    duration = _duration(source, rows)
     for candidate in selected:
         # Defensive validation makes future changes unable to leak bad host data.
         start, end = float(candidate["start"]), float(candidate["end"])
