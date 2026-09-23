@@ -56,6 +56,8 @@ docker compose --env-file /opt/clipflow/.env -f /opt/clipflow/deploy/azure/compo
 
 The cloud-init script installs Docker Engine and Compose from Docker's Ubuntu repository. If `/opt/clipflow` or its hosted environment file is not present yet, bootstrap completes with Docker ready and prints the follow-up command; otherwise it starts the stack immediately. It never creates Azure resources or embeds credentials.
 
+If the VM holds a source copy rather than a Git checkout, `deploy/azure/update-source.sh` updates it from an exact 40-character commit SHA. The script preserves `/opt/clipflow/.env`, `build/` (including the desktop ZIP), and the named Docker volumes. It sets `CLIPFLOW_WORKER_ORIGIN` in `.env`, builds the worker, and waits for HTTPS health. Run it as root with the revision and direct worker HTTPS origin as arguments.
+
 ## Verification
 
 `backend/tests/test_hosting.py` uses a fake Supabase client and covers fail-closed configuration, local no-account mode, owner login, Secure/HttpOnly opaque cookies, non-owner rejection, exact-origin mutation checks, media/API protection, logout revocation, rate limiting, and session expiry. It does not contact a live Supabase account; perform one manual smoke test after the worker and Supabase owner are configured.

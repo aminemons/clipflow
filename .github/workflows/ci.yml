@@ -32,6 +32,8 @@ jobs:
         run: pip install -r backend/requirements.txt -r desktop/requirements.txt pytest
       - name: Check Python imports
         run: python -m compileall backend desktop launch.py
+      - name: Check Azure update script
+        run: bash -n deploy/azure/update-source.sh
       - name: Run Python tests
         run: python -m pytest backend/tests desktop/tests tests -q
       - name: Install frontend packages
