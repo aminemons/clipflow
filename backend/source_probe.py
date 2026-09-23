@@ -76,7 +76,7 @@ def classify_youtube_error(exc: BaseException, operation: str = "inspect") -> Yo
             operation=operation,
             help_url=YTDLP_FAQ_URL,
         )
-    if re.search(r"video unavailable|video removed|not available|does not exist|copyright", text):
+    if re.search(r"video (?:is )?unavailable|video removed|not available|does not exist|copyright", text):
         return YouTubeSourceError(
             "youtube_unavailable",
             "YouTube reports that this video is unavailable, removed, or restricted. Check the URL and choose another public video.",
@@ -107,6 +107,8 @@ def classify_youtube_error(exc: BaseException, operation: str = "inspect") -> Yo
         operation=operation,
         retryable=True,
     )
+
+
 def validate_youtube_url(url: str) -> str:
     """Validate and normalize a YouTube URL accepted by yt-dlp."""
     if not isinstance(url, str):

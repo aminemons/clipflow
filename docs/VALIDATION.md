@@ -5,7 +5,7 @@ from remaining release and provider limits.
 
 ## Automated checks
 
-- Full Python suite on the current source tree: **202 passed**.
+- Full Python suite on the current source, including the YouTube-unavailable classifier regression fix: **215 passed**.
 - Frontend subtitle and clip-library tests passed; production build passed.
 - Desktop bundle verification (`verify_bundle`) and packaged `--self-test` passed.
 - A real FFmpeg render test passed with word-timed captions in the export path.
@@ -15,35 +15,42 @@ from remaining release and provider limits.
 The 2026-09-23 source changes retain word timing from local Whisper and Groq,
 use it for captions and highlight boundaries, and make model-ranked clip IDs
 honor the provider's order. Provider integration checks used mocked responses;
-no live paid provider request was made. The published desktop ZIP and hosted
-worker still run the earlier build until rebuilt and deployed.
+no live paid provider request was made. The frontend production deployment
+and Azure worker were updated to revision `75e558e`. The worker health check
+returned HTTP 200, and the deployed code contains the `_model_excerpt` marker.
+Windows package workflow run `35893074996` passed and produced the public
+release ZIP. Its SHA-256 is
+`bfacee1ed25a6642c841ce9e9e07db038369c5f51e63c3d17bff10d50a3dd8eb`.
 
 ## Hosted deployment
 
-- Vercel deployment for commit `453bccc` succeeded. The Azure worker is deployed
-  and healthy.
-- Authenticated hosted smoke testing on `3df22f1` completed synthetic upload,
-  generation, editing, preview, MP4 export and download, and permanent project
-  deletion. On the latest commit, `453bccc`, login and project reads passed.
+- Vercel production deployment `Fnwi6JvfeGSpTK213B2DEwBdas1q` is Ready at
+  revision `75e558e`. The Azure worker was rebuilt from the same revision and
+  returned HTTP 200 from its health check.
+- An authenticated hosted smoke check completed synthetic upload, automatic
+  clip generation, proof, and export; the resulting download link appeared. This
+  does not confirm playback of a downloaded file.
 - YouTube hosted downloads can still encounter provider anti-bot blocks. A live
-  YouTube request returned that condition; it is not considered resolved.
+  request for public video `jNQXAC9IVRw` returned a bot prompt after a bounded
+  retry. An isolated, cookie-free `bgutil` 2.0.0 PO-token-provider test against
+  the same video also returned the bot prompt. The test containers and network
+  were removed; the production worker remained healthy. Hosted import
+  availability is not considered resolved.
+- A public [Cobalt API](https://github.com/imputnet/cobalt/blob/main/docs/api.md)
+  instance is not a supported backend: its operators do not permit use by other
+  projects without permission. Self-hosting it on this Azure VM would still use
+  the same blocked egress IP.
 
 ## Local desktop workflow
 
-- The packaged build at `453bccc` passed bundle verification and self-test. A
-  real seven-second synthetic upload completed one-click generation, preview,
-  MP4 export and download, and project deletion.
-- On this PC, offline Whisper Small ran out of memory. One-click generation
-  correctly fell back to visual clips with captions disabled and displayed a
-  warning. An earlier package on this PC processed an 11-minute source into five
-  captioned clips; that result does not establish Small-model operation on the
-  current package or under current memory conditions.
-- The Windows ZIP was assembled and published on 2026-09-22. Its SHA-256 is
-  `f5b4e5eb5121d2c3e88dfa39184f5fe280e6da9c415aab8590a5c8c76fc7119e`;
-  every archive entry passed CRC validation, required runtime/model files were
-  present, and the authenticated site returned the new 846,479,834-byte archive
-  with HTTP 206 range support. A fresh Windows extraction was not run because
-  the test machine did not have space for a second copy of the package.
+- The package build at `43d2460` passed bundle verification and an extracted
+  package self-test. A separate local end-to-end check used a synthetic
+  eight-second source: Smart and Full-source modes both generated and exported
+  720×1280 H.264/AAC files, confirmed with FFprobe. Temporary test files were
+  removed.
+- Windows package workflow `35893074996` passed, and the public release ZIP is
+  available with SHA-256
+  `bfacee1ed25a6642c841ce9e9e07db038369c5f51e63c3d17bff10d50a3dd8eb`.
 
 ## Remaining limits
 

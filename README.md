@@ -293,9 +293,7 @@ npm test
 Pop-Location
 ```
 
-The current source tree passes **202 Python tests**, frontend tests, and a production frontend build. Real-media tests exercise import, editing, rendering, captions, MP4 export, ZIP export, and persistence.
-
-These results do not establish that every provider, social account, or hosted workflow has been tested live. The new source changes have not been packaged into the published Windows ZIP or deployed to the hosted worker. The evidence and remaining checks are recorded in [docs/VALIDATION.md](docs/VALIDATION.md).
+The current Python suite passes **215 tests**, including the YouTube-unavailable classifier regression fix. Revision `75e558e` is deployed to Vercel and the Azure worker; the worker health check returned HTTP 200 and its deployed code includes the expected `_model_excerpt` marker. An authenticated hosted smoke check completed synthetic upload, automatic clip generation, proof, and export, and showed the resulting download link. Local synthetic-media checks confirmed that Smart and Full-source modes generated and exported 720×1280 H.264/AAC video. These checks do not establish that every provider or social account works live. See [docs/VALIDATION.md](docs/VALIDATION.md) for evidence and limits.
 
 To build the Windows package from a prepared build environment:
 
@@ -321,11 +319,13 @@ The application grew through five stages:
 4. **Desktop and hosting:** package the local runtime and deploy the shared frontend/backend architecture behind owner authentication.
 5. **Reliability and handoff:** improve import failures, package verification, onboarding, regression coverage, and setup documentation.
 
-The current repository contains the source improvements. A hosted worker must be rebuilt from the corresponding revision to receive backend changes; pushing frontend code alone does not update that worker.
+The frontend production deployment and hosted worker have both been updated through revision `75e558e`. Windows package workflow `35893074996` passed and produced the public release ZIP; see [docs/VALIDATION.md](docs/VALIDATION.md) for package evidence.
 
 ## Current limits and next steps
 
 This release suits a local user or a single hosted owner workspace. It is not yet a multi-tenant service.
+
+Hosted YouTube import is currently blocked for some public videos by YouTube's challenge against the Azure worker IP. A single cookie-free PO-token-provider test still received the same challenge. Use the desktop importer or upload a local copy when this happens; Clipflow does not request your YouTube account cookies or route media through an unverified proxy.
 
 The next useful improvements would be:
 

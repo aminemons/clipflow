@@ -164,6 +164,12 @@ def test_classify_download_error_has_stable_actionable_shape():
     assert refused.retryable is True
 
 
+def test_classify_video_unavailable_wording():
+    error = classify_youtube_error(RuntimeError("This video is unavailable"))
+    assert error.code == "youtube_unavailable"
+    assert error.retryable is False
+
+
 def test_upload_job_only_prepares_source_and_keeps_clips_empty(monkeypatch, tmp_path: Path):
     old_store, old_data = api.store, api.DATA
     old_jobs = api.jobs
