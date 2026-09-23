@@ -40,6 +40,10 @@ jobs:
           Expand-Archive -LiteralPath $archive -DestinationPath $extract
           & (Join-Path $extract "Clipflow\Clipflow.exe") --self-test
           if ($LASTEXITCODE -ne 0) { throw "Extracted desktop package failed to start" }
+          $protocol = (Get-Item -Path "HKCU:\Software\Classes\clipflow\shell\open\command").GetValue("")
+          if ($protocol -notlike '*Clipflow.exe*--import-ticket*') {
+            throw "Extracted desktop package did not register its import link"
+          }
           .\scripts\smoke-packaged.ps1 -Package (Join-Path $extract "Clipflow")
           Get-FileHash -Algorithm SHA256 -LiteralPath $archive
       - name: Publish verified archive

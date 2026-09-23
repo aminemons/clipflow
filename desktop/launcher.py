@@ -182,6 +182,45 @@ def _pick_port() -> int:
         return int(sock.getsockname()[1])
 
 
+def _register_protocol() -> None:
+    """Register clipflow:// for this Windows user without requiring elevation."""
+    if os.name != "nt" or not getattr(sys, "frozen", False):
+        return
+    import winreg
+
+    executable = str(Path(sys.executable).resolve())
+    with winreg.CreateKey(winreg.HKEY_CURRENT_USER, r"Software\Classes\clipflow") as key:
+        winreg.SetValueEx(key, "", 0, winreg.REG_SZ, "URL:Clipflow Import Protocol")
+        winreg.SetValueEx(key, "URL Protocol", 0, winreg.REG_SZ, "")
+    with winreg.CreateKey(winreg.HKEY_CURRENT_USER, r"Software\Classes\clipflow\shell\open\command") as key:
+        winreg.SetValueEx(key, "", 0, winreg.REG_SZ, f'"{executable}" --import-ticket "%1"')
+
+
+def _run_import_ticket(link: str) -> int:
+    """Handle a browser deep link without starting the local Clipflow API/UI."""
+    from desktop.import_bridge import ImportBridgeError, import_ticket
+
+    try:
+        editor_url = import_ticket(link)
+        opened = webbrowser.open(editor_url, new=1)
+        if not opened:
+            raise ImportBridgeError(f"Your project is ready. Open this address in your browser:\n{editor_url}")
+        _show_startup_message("Your YouTube video is ready in Clipflow.")
+        return 0
+    except ImportBridgeError as exc:
+        LOGGER.warning("Desktop import could not be completed: %s", exc)
+        _show_startup_message(f"Clipflow could not import this video:\n\n{exc}\n\nDetails: {LOG_PATH or 'the Clipflow desktop log'}", error=True)
+        return 1
+    except Exception:
+        LOGGER.exception("Unexpected desktop import failure")
+        _show_startup_message(
+            "Clipflow could not complete this import. Check your internet connection and try again.\n\n"
+            f"Details: {LOG_PATH or 'the Clipflow desktop log'}",
+            error=True,
+        )
+        return 1
+
+
 def _wait_for_health(
     url: str,
     timeout: float = 30.0,
@@ -300,8 +339,15 @@ def main(argv: list[str] | None = None) -> int:
     mode.add_argument("--headless", "--self-test", action="store_true", help="start the local API, verify health, then exit")
     mode.add_argument("--serve", action="store_true", help="run the local API without opening the desktop window")
     parser.add_argument("--port", type=int, help="development port (default: random loopback port)")
+    parser.add_argument("--import-ticket", metavar="URL", help="import a YouTube video from a browser handoff")
     args = parser.parse_args(argv)
+    if args.import_ticket:
+        app_data = _app_data()
+        app_data.mkdir(parents=True, exist_ok=True)
+        _configure_logging(app_data)
+        return _run_import_ticket(args.import_ticket)
     try:
+        _register_protocol()
         return run(headless=args.headless, serve=args.serve, port=args.port)
     except KeyboardInterrupt:
         return 0

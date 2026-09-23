@@ -235,6 +235,23 @@
   align-items: center;
   gap: 6px;
 }
+.source-desktop-import {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #e9b8ba;
+}
+.source-desktop-import > p,
+.source-desktop-error,
+.source-desktop-status {
+  margin: 9px 0 0;
+  font-size: 11px;
+  line-height: 1.5;
+}
+.source-desktop-import > p { color: #755c60; }
+.source-desktop-import .source-quality-field { margin-top: 0; }
+.source-desktop-error { color: #852f35; }
+.source-desktop-status { color: #514375; }
+.source-desktop-import > a.source-import-submit { text-decoration: none; }
 .source-import-footer {
   margin: 16px 0 0;
   color: #7e758a;

@@ -48,6 +48,7 @@ import ClipLibrary from "./ClipLibrary";
 import { libraryPatch, type LibraryPatch } from "./clipLibraryModel";
 import { parseSubtitles } from "./subtitleImport";
 import { api, AUTH_EXPIRED_EVENT } from "./apiClient";
+import { useHostedAuth } from "./HostedGate";
 import "./workspace.css";
 import type {
   Clip,
@@ -99,6 +100,7 @@ function routePage(): TourPage {
     : "projects";
 }
 export default function App() {
+  const { hosted } = useHostedAuth();
   const [page, setPage] = useState<TourPage>(routePage);
   const [settingsSection, setSettingsSection] = useState("processing");
   const [navCompact, setNavCompact] = useState(false);
@@ -2534,6 +2536,14 @@ export default function App() {
       )}
       {newProjectOpen && (
         <NewProjectDialog
+          hosted={hosted}
+          onDesktopImport={async (sourceUrl, quality) => {
+            const result = await api<{ launch_url: string }>("/desktop-import/tickets", {
+              method: "POST",
+              body: JSON.stringify({ url: sourceUrl, quality }),
+            });
+            return result.launch_url;
+          }}
           url={url}
           onUrl={setUrl}
           onFile={importFile}

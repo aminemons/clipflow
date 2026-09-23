@@ -9,12 +9,17 @@ Set these variables on the persistent worker:
 ```text
 CLIPFLOW_MODE=hosted
 CLIPFLOW_PUBLIC_ORIGIN=https://studio.example.com
+CLIPFLOW_WORKER_ORIGIN=https://worker.example.com
 SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_PUBLISHABLE_KEY=sb_publishable_...
 CLIPFLOW_OWNER_ID=<the Supabase auth user id>
 ```
 
 `CLIPFLOW_PUBLIC_ORIGIN` must be HTTPS and is compared exactly against the browser `Origin`. Hosted startup fails closed if it is missing, uses HTTP, contains a path/query, or if the Supabase URL, publishable key, or owner ID is absent. `SUPABASE_ANON_KEY` is accepted as a compatibility alias. Provider secrets stay on the worker and are never returned by the auth endpoints.
+
+`CLIPFLOW_WORKER_ORIGIN` is the direct HTTPS address of this persistent worker. It is required for the optional desktop-assisted YouTube import link; when absent, only that handoff returns 503. Put it in the worker's `.env` and pass it through the container environment. The desktop package trusts only configured worker and website origins, so self-hosted deployments must also configure `CLIPFLOW_TRUSTED_WORKER_ORIGINS` and `CLIPFLOW_TRUSTED_WEB_ORIGINS` on the desktop machine.
+
+When the hosted YouTube request is blocked, an authenticated owner can create a short-lived desktop ticket. The worker stores only its hash in the data volume. The installed Windows app handles `clipflow://`, validates the worker's HTTPS origin, downloads on the user's connection, and uploads the MP4 directly to the worker with that ticket in an Authorization header. The worker accepts that bearer token only on the exact ticket lookup and upload paths; the successful upload consumes it. The existing 500 MB source limit and project import checks still apply. This route does not depend on a third-party downloader or expose the owner session cookie to the desktop process.
 
 The adapter uses a server-side opaque `clipflow_session` cookie. The raw token is only sent in the Secure, HttpOnly, SameSite=Lax cookie; the worker stores a SHA-256 digest with an expiry. Sessions are intentionally in memory, so a worker restart signs the owner out. Login is verified with Supabase's REST `POST /auth/v1/token?grant_type=password` endpoint, whose response includes a user object and access token in the [official Auth API](https://supabase.com/docs/reference/self-hosting-auth), then the returned user ID must exactly equal `CLIPFLOW_OWNER_ID`. Five attempts per socket peer per minute are allowed, with an additional process-wide cap; spoofable `X-Forwarded-For` headers are not used for authorization or as the only limiter key. Passwords are never logged.
 

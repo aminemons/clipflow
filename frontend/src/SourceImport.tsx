@@ -27,6 +27,8 @@ type Props = {
   onYoutube: (quality: number) => void;
   busy: boolean;
   uploading: boolean;
+  hosted?: boolean;
+  onDesktopImport?: (url: string, quality: number) => Promise<string>;
 };
 
 type InspectState = "idle" | "loading" | "success" | "error";
@@ -91,6 +93,8 @@ export function SourceImport({
   onYoutube,
   busy,
   uploading,
+  hosted = false,
+  onDesktopImport,
 }: Props) {
   const input = useRef<HTMLInputElement>(null);
   const urlInput = useRef<HTMLInputElement>(null);
@@ -101,6 +105,10 @@ export function SourceImport({
   const [inspectError, setInspectError] = useState<InspectFailure | null>(null);
   const [sourceInfo, setSourceInfo] = useState<YoutubeSourceInfo | null>(null);
   const [quality, setQuality] = useState<number | null>(null);
+  const [desktopBusy, setDesktopBusy] = useState(false);
+  const [desktopError, setDesktopError] = useState("");
+  const [desktopStarted, setDesktopStarted] = useState(false);
+  const [desktopLaunchUrl, setDesktopLaunchUrl] = useState("");
 
   const invalidateInspection = () => {
     requestId.current += 1;
@@ -110,6 +118,9 @@ export function SourceImport({
     setInspectError(null);
     setSourceInfo(null);
     setQuality(null);
+    setDesktopError("");
+    setDesktopStarted(false);
+    setDesktopLaunchUrl("");
   };
 
   useEffect(() => {
@@ -138,6 +149,8 @@ export function SourceImport({
     setInspectError(null);
     setSourceInfo(null);
     setQuality(null);
+    setDesktopError("");
+    setDesktopLaunchUrl("");
     try {
       const nextInfo = await onInspect(requestedUrl, controller.signal);
       if (
@@ -173,6 +186,30 @@ export function SourceImport({
   const editLink = () => {
     invalidateInspection();
     requestAnimationFrame(() => urlInput.current?.focus());
+  };
+
+  const importWithDesktop = async () => {
+    if (!onDesktopImport || !url.trim() || desktopBusy) return;
+    setDesktopBusy(true);
+    setDesktopError("");
+    try {
+      const launchUrl = await onDesktopImport(url.trim(), quality ?? 720);
+      const target = new URL(launchUrl);
+      if (target.protocol !== "clipflow:" || target.hostname !== "import") {
+        throw new Error("Clipflow returned an invalid desktop link. Please try again.");
+      }
+      setDesktopLaunchUrl(launchUrl);
+      setDesktopStarted(true);
+      window.location.assign(launchUrl);
+    } catch (error) {
+      setDesktopError(
+        error instanceof Error && error.message.trim()
+          ? error.message
+          : "Couldn't prepare the desktop import. Please try again.",
+      );
+    } finally {
+      setDesktopBusy(false);
+    }
   };
 
   return (
@@ -284,6 +321,36 @@ export function SourceImport({
             desktop app uses your own connection and may work when the web app
             cannot.
           </small>
+          {hosted && inspectError.title === "YouTube blocked this connection" && (
+            <div className="source-desktop-import">
+              <label className="source-quality-field">
+                Desktop download quality
+                <select
+                  value={quality ?? 720}
+                  onChange={(event) => setQuality(Number(event.target.value))}
+                  aria-label="Desktop download quality"
+                  disabled={desktopBusy}
+                >
+                  {[360, 720, 1080].map((value) => (
+                    <option key={value} value={value}>{value}p</option>
+                  ))}
+                </select>
+              </label>
+              <p>Install or open Clipflow Desktop. It downloads the source on your computer and sends it back to this hosted workspace when finished. If the desktop app does not open, use Upload a video above.</p>
+              <button
+                className="source-import-submit"
+                type="button"
+                disabled={desktopBusy || busy}
+                onClick={() => void importWithDesktop()}
+              >
+                {desktopBusy ? <LoaderCircle size={16} className="spin" /> : <ArrowRight size={16} />}
+                {desktopBusy ? "Preparing desktop import…" : "Import with desktop"}
+              </button>
+              {desktopError && <p className="source-desktop-error" role="alert">{desktopError}</p>}
+              {desktopStarted && <p className="source-desktop-status" role="status">Opening Clipflow Desktop. If your browser blocks the automatic launch, use the button below.</p>}
+              {desktopLaunchUrl && <a className="source-import-submit" href={desktopLaunchUrl}>Open Clipflow Desktop</a>}
+            </div>
+          )}
         </div>
       )}
       {sourceInfo && inspectState === "success" && (
@@ -366,6 +433,8 @@ export function NewProjectDialog({
   onClose,
   error,
   uploading,
+  hosted,
+  onDesktopImport,
   ...props
 }: Props & { onClose: () => void; error: string }) {
   const dialog = useRef<HTMLDialogElement>(null);
@@ -401,7 +470,7 @@ export function NewProjectDialog({
           <X size={20} />
         </button>
       </div>
-      <SourceImport {...props} uploading={uploading} />
+      <SourceImport {...props} uploading={uploading} hosted={hosted} onDesktopImport={onDesktopImport} />
       {error && (
         <p className="source-import-error" role="alert">
           {error}

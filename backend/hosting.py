@@ -38,6 +38,7 @@ class HostedConfig:
     supabase_publishable_key: str = ""
     owner_id: str = ""
     session_ttl_seconds: int = 8 * 60 * 60
+    worker_origin: str = ""
 
     @property
     def hosted(self) -> bool:
@@ -67,6 +68,15 @@ class HostedConfig:
             raise HostedConfigurationError(
                 "Hosted mode requires CLIPFLOW_PUBLIC_ORIGIN to be an HTTPS origin."
             )
+
+        worker_origin = env.get("CLIPFLOW_WORKER_ORIGIN", "").strip().rstrip("/")
+        parsed_worker = urlsplit(worker_origin)
+        if worker_origin and (
+            parsed_worker.scheme != "https" or not parsed_worker.netloc
+            or parsed_worker.username is not None or parsed_worker.password is not None
+            or parsed_worker.path not in {"", "/"} or parsed_worker.query or parsed_worker.fragment
+        ):
+            raise HostedConfigurationError("CLIPFLOW_WORKER_ORIGIN must be an HTTPS origin.")
 
         supabase_url = env.get("SUPABASE_URL", "").strip().rstrip("/")
         parsed_supabase = urlsplit(supabase_url)
@@ -117,6 +127,7 @@ class HostedConfig:
             supabase_publishable_key=publishable_key,
             owner_id=owner_id,
             session_ttl_seconds=ttl,
+            worker_origin=worker_origin,
         )
 
 
@@ -377,6 +388,16 @@ class HostedSecurityMiddleware(BaseHTTPMiddleware):
         is_docs = path in {"/docs", "/redoc", "/openapi.json"} or path.startswith("/docs/")
         if not (is_api or is_media or is_docs):
             return await call_next(request)
+
+        # These two exact desktop handoff endpoints use a one-use bearer ticket
+        # validated by their handlers. They intentionally carry no browser cookie.
+        desktop_ticket = path == "/api/desktop-import/ticket" and request.method == "GET"
+        desktop_upload = path == "/api/desktop-import/upload" and request.method == "POST"
+        if desktop_ticket or desktop_upload:
+            auth = request.headers.get("authorization", "")
+            if not auth.startswith("Bearer ") or request.cookies:
+                return _no_store(JSONResponse({"detail": "Authentication required."}, status_code=401))
+            return _no_store(await call_next(request))
 
         if path == "/api/health" and request.method in {"GET", "HEAD"}:
             current = self.sessions.get(request.cookies.get("clipflow_session"))

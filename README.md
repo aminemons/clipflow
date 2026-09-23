@@ -34,7 +34,9 @@ The browser provides the editor. An Azure worker processes uploads, analyzes foo
 
 The web version supports the same core editing workflow as the local application. Optional provider features require credentials on the hosted worker.
 
-YouTube sometimes blocks requests from datacenter IP addresses. If a link cannot be imported, upload the original video file or try the desktop application. Desktop imports can also be subject to YouTube restrictions.
+YouTube sometimes blocks requests from datacenter IP addresses. If the hosted import reports that block, use **Import with desktop**. The new Windows release downloads the video over your own connection, uploads it to your signed-in web workspace, and opens the imported project. You still choose when and how to make clips. This needs the desktop app installed and internet access; YouTube may also restrict a home connection. Uploading an MP4 remains available.
+
+To use the handoff, extract the latest Windows release and open Clipflow once to register its `clipflow://` link. Return to the hosted site's **New project** dialog, paste the YouTube URL, click **Check video**, and choose **Import with desktop** if the server is blocked. Select the requested quality and allow your browser to open Clipflow. The link expires after an hour; create a new one if the download takes longer. The resulting project is stored on the hosted worker, so it appears in **Projects** after import.
 
 ## Use the Windows desktop application
 

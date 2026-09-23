@@ -19,5 +19,16 @@ stores it under your local application data.
 The desktop process only listens on 127.0.0.1 and chooses a random port.
 WebView2 (the Edge runtime) is required by pywebview on Windows 10/11.
 
+When started, the packaged Windows app registers the clipflow:// import link for
+the current Windows user. A YouTube import opened from Clipflow's website runs
+on this computer's internet connection, saves a temporary MP4 (up to 500 MB),
+then uploads it to the Clipflow server and opens the new project. The one-use
+import link expires; create a fresh link if the desktop reports that it expired.
+Import diagnostics are in %LOCALAPPDATA%\Clipflow\logs\desktop.log.
+
+Self-hosters can set CLIPFLOW_TRUSTED_WORKER_ORIGINS and
+CLIPFLOW_TRUSTED_WEB_ORIGINS to comma-separated HTTPS origins before launching
+Clipflow. The defaults trust only the official Clipflow worker and website.
+
 The supported build command creates both the portable folder and
 Clipflow-windows-x64.zip. Use -WithoutZip when only the folder is needed.

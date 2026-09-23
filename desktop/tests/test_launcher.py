@@ -173,3 +173,36 @@ def test_frozen_runtime_requires_bundled_whisper_model(tmp_path, monkeypatch):
 
     with pytest.raises(RuntimeError, match="local speech files are missing"):
         launcher._assert_frozen_speech_assets()
+
+
+def test_import_ticket_argument_runs_bridge_without_starting_local_ui(monkeypatch, tmp_path):
+    from desktop import import_bridge
+
+    opened = []
+    monkeypatch.setattr(launcher, "_app_data", lambda: tmp_path / "app")
+    monkeypatch.setattr(import_bridge, "import_ticket", lambda link: "https://clipflow-aminemons.vercel.app/#/editor/p1")
+    monkeypatch.setattr(launcher.webbrowser, "open", lambda url, new=0: opened.append(url) or True)
+    monkeypatch.setattr(launcher, "_show_startup_message", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(launcher, "run", lambda **_kwargs: pytest.fail("normal UI must not start"))
+    monkeypatch.setattr(launcher, "_register_protocol", lambda: pytest.fail("protocol registration is for normal startup"))
+
+    assert launcher.main(["--import-ticket", "clipflow://import?ticket=secret&server=trusted"]) == 0
+    assert opened == ["https://clipflow-aminemons.vercel.app/#/editor/p1"]
+
+
+def test_import_ticket_error_is_reported_without_echoing_link(monkeypatch, tmp_path):
+    from desktop import import_bridge
+
+    messages = []
+    secret_link = "clipflow://import?ticket=secret-token&server=trusted"
+    monkeypatch.setattr(launcher, "_app_data", lambda: tmp_path / "app")
+
+    def fail(_link):
+        raise import_bridge.ImportBridgeError("The import ticket is invalid or expired.")
+
+    monkeypatch.setattr(import_bridge, "import_ticket", fail)
+    monkeypatch.setattr(launcher, "_show_startup_message", lambda message, **kwargs: messages.append((message, kwargs)))
+
+    assert launcher.main(["--import-ticket", secret_link]) == 1
+    assert "invalid or expired" in messages[0][0]
+    assert secret_link not in messages[0][0]

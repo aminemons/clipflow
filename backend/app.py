@@ -23,7 +23,8 @@ from fastapi.responses import FileResponse, PlainTextResponse, StreamingResponse
 from pydantic import BaseModel, Field, StrictBool, StrictInt
 
 from .config import public_capabilities, value
-from .hosting import install_hosted_security
+from .hosting import install_hosted_security, require_hosted_owner
+from .desktop_import import TicketStore, register_desktop_import
 from . import media, transcription as speech
 from .media import (
     analyze_segments,
@@ -1410,6 +1411,11 @@ async def upload_project(
         or target_duration > 300
     ):
         raise HTTPException(400, "target_duration must be 5..300")
+    project = await _save_uploaded_video(file)
+    return submit(project["id"], upload_job, project["id"], target_duration)
+
+
+async def _save_uploaded_video(file: UploadFile) -> dict:
     suffix = Path(file.filename or "source.mp4").suffix.lower() or ".mp4"
     if suffix not in {".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v"}:
         raise HTTPException(400, "Choose an MP4, MOV, MKV, WebM, AVI, or M4V video.")
@@ -1432,7 +1438,16 @@ async def upload_project(
         )
     finally:
         temp.unlink(missing_ok=True)
-    return submit(project["id"], upload_job, project["id"], target_duration)
+    return project
+
+
+async def _save_desktop_upload(file: UploadFile) -> dict:
+    return await _save_uploaded_video(file)
+
+
+def _submit_desktop_upload(project: dict) -> dict:
+    result = submit(project["id"], upload_job, project["id"], 30)
+    return {"project_id": project["id"], "job_id": result.get("id"), **result}
 
 
 @app.post("/api/sources/youtube/inspect")
@@ -2360,6 +2375,15 @@ publishing_handler = register_publishing(app, lambda: store, locks={"projects": 
 from .desktop_download import register as register_desktop
 
 register_desktop(app)
+register_desktop_import(
+    app,
+    ticket_store=TicketStore(DATA / "desktop-import.sqlite3"),
+    worker_origin=hosted_config.worker_origin,
+    web_origin=hosted_config.public_origin,
+    require_owner=require_hosted_owner,
+    upload_file=_save_desktop_upload,
+    submit_upload=_submit_desktop_upload,
+)
 
 frontend = ROOT / "frontend" / "dist"
 if frontend.exists():
