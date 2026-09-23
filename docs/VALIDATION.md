@@ -1,13 +1,22 @@
 # Validation record
 
-Evidence current through 2026-09-22. This record distinguishes completed checks
+Evidence current through 2026-09-23. This record distinguishes completed checks
 from remaining release and provider limits.
 
 ## Automated checks
 
-- Full Python suite: **188 passed**.
+- Full Python suite on the current source tree: **202 passed**.
 - Frontend subtitle and clip-library tests passed; production build passed.
 - Desktop bundle verification (`verify_bundle`) and packaged `--self-test` passed.
+- A real FFmpeg render test passed with word-timed captions in the export path.
+- A synthetic spoken WAV passed through the bundled offline Whisper Small model:
+  two segments and 11 aligned words were returned without a network request.
+
+The 2026-09-23 source changes retain word timing from local Whisper and Groq,
+use it for captions and highlight boundaries, and make model-ranked clip IDs
+honor the provider's order. Provider integration checks used mocked responses;
+no live paid provider request was made. The published desktop ZIP and hosted
+worker still run the earlier build until rebuilt and deployed.
 
 ## Hosted deployment
 

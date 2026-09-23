@@ -114,6 +114,7 @@ Publishing is a separate, optional workflow. It requires configured platform acc
 - Suggestion review, search, filters, duplication, reversible removal, and permanent deletion.
 - Subject-following framing, manual positions, camera keyframes, fit, and blurred-background layouts.
 - Local transcription and optional hosted transcription.
+- Word-timed captions from local Whisper or Groq when alignment is available; corrected text remains authoritative.
 - Reuse of embedded timed subtitles when available, without loading the speech model.
 - Transcript correction, SRT/VTT import, and SRT download.
 - Caption fonts, styles, colors, and draggable positioning.
@@ -160,6 +161,7 @@ Credentials entered in Settings are stored on the processing machine. The fronte
 - Use manual framing or fit layouts for slides, diagrams, and footage where cropping would remove essential content.
 
 A larger model or paid provider can improve particular tasks, but it does not guarantee accurate dialect recognition or perfect framing.
+Highlight models rank locally bounded candidate ranges; they cannot invent source timestamps or render footage. Generated suggestions still need a rendered-preview review. Local framing follows faces or motion and protects broad screen content, but it does not yet identify the active speaker from lip movement and audio. The current pipeline and quality checks are described in [docs/QUALITY_PIPELINE.md](docs/QUALITY_PIPELINE.md).
 
 ### Social publishing
 
@@ -283,9 +285,9 @@ npm test
 Pop-Location
 ```
 
-The recorded source validation includes **188 passing Python tests**, frontend tests, and a production frontend build. Real-media tests exercise import, editing, rendering, captions, MP4 export, ZIP export, and persistence.
+The current source tree passes **202 Python tests**, frontend tests, and a production frontend build. Real-media tests exercise import, editing, rendering, captions, MP4 export, ZIP export, and persistence.
 
-These results do not establish that every provider, social account, or hosted workflow has been tested live. The evidence and remaining checks are recorded in [docs/VALIDATION.md](docs/VALIDATION.md).
+These results do not establish that every provider, social account, or hosted workflow has been tested live. The new source changes have not been packaged into the published Windows ZIP or deployed to the hosted worker. The evidence and remaining checks are recorded in [docs/VALIDATION.md](docs/VALIDATION.md).
 
 To build the Windows package from a prepared build environment:
 

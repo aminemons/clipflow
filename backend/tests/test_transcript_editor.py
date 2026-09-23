@@ -61,6 +61,28 @@ def test_correction_updates_captions_and_invalidates_only_automatic_exports(edit
     assert "Corrected name" not in captions and "00:00:03,000" in captions
 
 
+def test_correction_keeps_alignment_only_for_unchanged_segments(editor):
+    client, store = editor
+    project = store.get("edit")
+    project["transcript"][0]["words"] = [
+        {"start": 0.2, "end": 1.1, "text": "Misspelled"}
+    ]
+    project["transcript"][1]["words"] = [
+        {"start": 3.2, "end": 4.0, "text": "Useful"},
+        {"start": 4.1, "end": 5.0, "text": "conclusion"},
+    ]
+    store.save(project)
+
+    rows = project["transcript"]
+    rows[0]["text"] = "Corrected"
+    response = client.put("/api/projects/edit/transcript", json={"segments": rows})
+    assert response.status_code == 200
+    saved = store.get("edit")["transcript"]
+    assert "words" not in saved[0]
+    assert saved[1]["words"] == project["transcript"][1]["words"]
+    assert "Corrected" in media.srt_for_clip(store.get("edit")["clips"][0], saved)
+
+
 def test_correction_rejects_changed_timestamps_and_active_jobs(editor, monkeypatch):
     client, store = editor
     before = store.get("edit")

@@ -63,6 +63,34 @@ def test_hosted_chunks_shift_timestamps_and_remove_audio(monkeypatch, tmp_path):
     assert list(tmp_path.iterdir()) == [source]
 
 
+def test_groq_word_timestamps_are_attached_to_the_matching_segment(monkeypatch, tmp_path):
+    def handler(request):
+        body = request.content.decode("utf-8", errors="replace")
+        assert 'name="timestamp_granularities[]"' in body
+        assert "word" in body and "segment" in body
+        return httpx.Response(
+            200,
+            json={
+                "segments": [
+                    {"start": 0, "end": 1.4, "text": "First thought."},
+                    {"start": 1.4, "end": 3, "text": "Second thought."},
+                ],
+                "words": [
+                    {"start": 0.2, "end": 0.6, "word": "First"},
+                    {"start": 0.7, "end": 1.1, "word": "thought."},
+                    {"start": 1.6, "end": 2, "word": "Second"},
+                    {"start": 2.1, "end": 2.6, "word": "thought."},
+                ],
+            },
+        )
+
+    source = setup_groq(monkeypatch, tmp_path, handler)
+    rows = transcription.transcribe(source, 3, lambda *_: None)
+    assert [word["text"] for word in rows[0]["words"]] == ["First", "thought."]
+    assert [word["text"] for word in rows[1]["words"]] == ["Second", "thought."]
+    assert rows[1]["words"][0]["start"] == 1.6
+
+
 def test_bad_key_is_actionable_without_leaking_it(monkeypatch, tmp_path):
     source = setup_groq(monkeypatch, tmp_path, lambda _: httpx.Response(401))
     with pytest.raises(RuntimeError, match="GROQ_API_KEY") as error:
@@ -84,3 +112,62 @@ def test_local_transcription_returns_timestamped_segments(monkeypatch, tmp_path)
     )
     rows = transcription._local(tmp_path / "source.mp4", 2, lambda *_: None)
     assert rows == [{"start": 0.2, "end": 1.8, "text": "hello"}]
+
+
+def test_local_transcription_preserves_word_timestamps(monkeypatch, tmp_path):
+    monkeypatch.setattr(transcription, "_MODEL_CACHE", transcription.OrderedDict())
+
+    class Model:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def transcribe(self, *args, **kwargs):
+            assert kwargs["word_timestamps"] is True
+            segment = SimpleNamespace(
+                start=0.2,
+                end=1.8,
+                text=" hello world ",
+                words=[
+                    SimpleNamespace(start=0.3, end=0.7, word=" hello"),
+                    SimpleNamespace(start=0.8, end=1.2, word=" world"),
+                    SimpleNamespace(start=float("nan"), end=1.4, word=" invalid"),
+                ],
+            )
+            return iter([segment]), None
+
+    monkeypatch.setitem(
+        sys.modules, "faster_whisper", SimpleNamespace(WhisperModel=Model)
+    )
+    rows = transcription._local(tmp_path / "source.mp4", 2, lambda *_: None)
+    assert rows == [
+        {
+            "start": 0.2,
+            "end": 1.8,
+            "text": "hello world",
+            "words": [
+                {"start": 0.3, "end": 0.7, "text": "hello"},
+                {"start": 0.8, "end": 1.2, "text": "world"},
+            ],
+        }
+    ]
+
+
+def test_quick_local_draft_skips_word_alignment(monkeypatch, tmp_path):
+    monkeypatch.setattr(transcription, "_MODEL_CACHE", transcription.OrderedDict())
+
+    class Model:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def transcribe(self, *args, **kwargs):
+            assert kwargs["word_timestamps"] is False
+            return iter([SimpleNamespace(start=0, end=1, text=" draft ")]), None
+
+    monkeypatch.setitem(
+        sys.modules, "faster_whisper", SimpleNamespace(WhisperModel=Model)
+    )
+    rows = transcription._local(
+        tmp_path / "source.mp4", 1, lambda *_: None,
+        transcription.effective_options({"quality": "fast", "provider": "local"}),
+    )
+    assert rows == [{"start": 0, "end": 1, "text": "draft"}]

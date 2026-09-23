@@ -28,6 +28,8 @@ flowchart LR
 
 `store.py` owns atomic JSON metadata, additive schema migration and last-valid backups. `app.py` coordinates HTTP operations and background jobs. `media.py` handles probing, scene/silence analysis, tracking, crop geometry and FFmpeg. `transcription.py` owns speech options and local/Groq providers. `highlights.py` ranks candidate passages separately from complete-source segmentation. `export_artifacts.py` keeps job-specific output paths. `settings.py` keeps provider credentials server-side. `hosting.py` supplies the optional hosted access boundary.
 
+For smart clips, transcription supplies segment timing and, when available, word timing. Scene changes and pauses supply more possible boundaries. The local selector builds source-bounded candidate ranges. An optional text model sees a compact selection of those candidates and returns their IDs in preference order; it cannot supply executable commands or new timestamps. Local code checks duration, overlap and source bounds before saving clip definitions. Captions use aligned word cues when the saved words still match the editable transcript. A corrected segment drops its old word alignment instead of exporting stale recognized text.
+
 The data directory separates `projects/*.json`, `jobs.json`, original media under `files/`, render proofs, and immutable `files/<project>/exports/<job>/` artifacts. Browser state remembers the working project and selection; project edits and finished jobs remain on the server after refresh. Interrupted jobs become visible retryable errors after restart rather than silently rerunning paid requests.
 
 ## Supabase evaluation
@@ -45,6 +47,8 @@ Source playback is a fast editing approximation. FFmpeg render proofs use the ex
 ## Models, secrets and limits
 
 The free path uses FFmpeg, OpenCV, yt-dlp and faster-whisper. The Windows package includes the multilingual Small model for offline use. Source installs and other model choices download once, subject to available disk space. Larger models trade speed and memory for possible accuracy improvements, not a guaranteed dialect result. Groq is optional speech/highlight processing, and Higgsfield is optional remote generation. No successful live provider request is claimed without recorded evidence.
+
+The present camera renderer uses face detection, motion fallback, and a bounded-motion controller. It is not an audio-visual active-speaker detector. A speaker-aware upgrade would run in a separate analysis pass, cache timestamped face/speaker evidence, and feed validated targets to the existing controller. The renderer would still fall back to fit framing when evidence is uncertain. We have not bundled a third-party active-speaker checkpoint without confirming its redistribution terms and measuring its performance on real podcast footage.
 
 Credentials stay in the server environment or a private settings file; the browser receives only configured/not-configured flags. They are excluded from Git and source packages. Uploaded content, downloaded model caches, and user projects are never part of the source repository; the Windows release script fetches its documented model while building the distributable.
 

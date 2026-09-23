@@ -942,7 +942,7 @@ export default function ClipSetup({
                           : undefined
                       }
                     >
-                      Speech provider
+                      Moment ranking
                     </FieldLabel>
                     <select
                       value={settings.provider}
@@ -961,11 +961,17 @@ export default function ClipSetup({
                       {providerOptions.map((provider) => (
                         <option key={provider} value={provider}>
                           {provider === "local"
-                            ? "On this computer"
+                            ? "Local ranking"
                             : provider[0].toUpperCase() + provider.slice(1)}
                         </option>
                       ))}
                     </select>
+                    <small className="clip-setup-inline-note">
+                      This ranks clip suggestions. Speech recognition uses the
+                      transcription provider selected in Settings.
+                      {!["local", "ollama"].includes(settings.provider) &&
+                        " Clipflow sends candidate transcript text to the selected provider."}
+                    </small>
                   </label>
                   <div className="clip-setup-subgrid clip-setup-speech-options">
                     <label className="clip-setup-field">

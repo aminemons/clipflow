@@ -11,7 +11,7 @@ import time
 import zipfile
 from pathlib import Path
 from typing import Callable
-from .caption_layout import caption_cues, font_name, fonts_directory
+from .caption_layout import caption_cues, font_name, fonts_directory, word_caption_cues
 
 from .camera import (
     CameraController,
@@ -177,13 +177,14 @@ def srt_for_clip(
         text = str(item.get("text", "")).strip()
         if b <= start or a >= end or not text:
             continue
-        rows.append(
-            (
-                max(a, start) - start,
-                min(b, end) - start,
-                text,
+        timed = word_caption_cues(item, start, end)
+        if timed is None:
+            rows.append((max(a, start) - start, min(b, end) - start, text))
+        else:
+            rows.extend(
+                (cue_start - start, cue_end - start, cue_text)
+                for cue_start, cue_end, cue_text in timed
             )
-        )
     manual = str(clip.get("caption_text", "")).strip()
     if manual:
         rows = [(0.0, (end - start) * scale, manual)]

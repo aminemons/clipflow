@@ -67,6 +67,39 @@ def test_local_score_prefers_clip_near_requested_duration():
     assert ranked[0]["id"] == 0
 
 
+def test_model_rank_order_controls_overlap_and_clip_limit(monkeypatch):
+    from backend import language_models
+
+    candidates = [
+        {"id": 0, "start": 0.0, "end": 5.0, "text": "lower model rank",
+         "duration": 5.0, "target": 5.0, "density": 1.0, "info": 1.0},
+        {"id": 1, "start": 8.0, "end": 13.0, "text": "preferred model rank",
+         "duration": 5.0, "target": 5.0, "density": 0.1, "info": 0.1},
+    ]
+    monkeypatch.setattr(language_models, "generate_json", lambda *_args: {"ids": [1, 0]})
+
+    selected = highlights._model_rank(candidates, "", 1, "openai", None)
+
+    assert [candidate["id"] for candidate in selected] == [1]
+
+
+def test_model_candidate_context_is_compact_and_spread_out():
+    candidates = [
+        {"id": index, "start": float(index * 3), "end": float(index * 3 + 2),
+         "text": "x" * 1000, "duration": 2.0, "target": 2.0,
+         "density": 1.0 if index < 40 else 0.1, "info": 1.0}
+        for index in range(80)
+    ]
+
+    context = highlights._model_candidate_context(candidates, "")
+
+    assert len(context) == 30
+    assert all(len(candidate["text"][:300]) == 300 for candidate in context)
+    assert all(highlights._overlap(left, right) <= 0.1
+               for i, left in enumerate(context) for right in context[i + 1:])
+    assert any(candidate["start"] > 180 for candidate in context)
+
+
 def test_source_bounds_tolerance_and_no_duplicate_intervals(monkeypatch, tmp_path):
     _local_media(monkeypatch, 10)
     source = tmp_path / "source.mp4"
@@ -101,6 +134,65 @@ def test_strict_max_caps_smart_windows(monkeypatch, tmp_path):
     )
     assert result
     assert all(row["end"] - row["start"] <= 4.55 for row in result)
+
+
+def test_word_timings_trim_sentence_padding_without_truncating_it(monkeypatch, tmp_path):
+    _local_media(monkeypatch, 20)
+    source = tmp_path / "source.mp4"
+    source.touch()
+    rows = highlights._clean_transcript(
+        [
+            {
+                "start": 1,
+                "end": 5,
+                "text": "A complete sentence.",
+                "words": [
+                    {"start": 1.2, "end": 1.5, "text": "A"},
+                    {"start": 1.6, "end": 2.4, "text": "complete"},
+                    {"start": 2.5, "end": 4.8, "text": "sentence."},
+                ],
+            }
+        ]
+    )
+    candidates = highlights._candidate_windows(
+        source, rows, 4, 3.2, 4.8, None, sentence_context="keep"
+    )
+    sentence = next(row for row in candidates if row["text"] == "A complete sentence.")
+    assert sentence["start"] == 1.2
+    assert sentence["end"] == 4.8
+    assert sentence["text"] == "A complete sentence."
+
+
+def test_candidate_that_cuts_a_long_turn_is_marked_for_review(monkeypatch, tmp_path):
+    _local_media(monkeypatch, 10)
+    source = tmp_path / "source.mp4"
+    source.touch()
+    rows = highlights._clean_transcript([
+        {"start": 0, "end": 10, "text": "One long uninterrupted explanation."}
+    ])
+
+    candidates = highlights._candidate_windows(source, rows, 5, 4, 6, None)
+
+    assert any(candidate["complete"] is False for candidate in candidates)
+    partial = next(candidate for candidate in candidates if not candidate["complete"])
+    assert "cut-off thought" in highlights._public(partial)["reason"]
+
+
+def test_invalid_word_timings_do_not_affect_legacy_segments():
+    rows = highlights._clean_transcript(
+        [
+            {
+                "start": 0,
+                "end": 2,
+                "text": "Legacy segment",
+                "words": [
+                    {"start": 3, "end": 4, "text": "outside"},
+                    {"start": float("nan"), "end": 1, "text": "invalid"},
+                ],
+            }
+        ]
+    )
+    assert rows == [{"start": 0, "end": 2, "text": "Legacy segment"}]
 
 
 def test_short_silent_source_is_safe(monkeypatch, tmp_path):

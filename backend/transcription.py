@@ -453,6 +453,8 @@ def _local(
     kwargs = {
         "vad_filter": True,
         "task": "transcribe",
+        # Quick drafts skip alignment to keep the lowest-RAM local path fast.
+        "word_timestamps": effective["quality"] != "fast",
         "beam_size": 5 if effective["quality"] == "accurate" else 3,
         "condition_on_previous_text": False,
         "language": None if effective["language"] == "auto" else effective["language"],
@@ -466,7 +468,25 @@ def _local(
             start = round(max(0, segment.start), 3)
             end = round(min(duration, segment.end), 3)
             if text and end > start:
-                rows.append({"start": start, "end": end, "text": text})
+                row = {"start": start, "end": end, "text": text}
+                words = []
+                for word in getattr(segment, "words", None) or []:
+                    try:
+                        raw_start, raw_end = float(word.start), float(word.end)
+                    except (AttributeError, TypeError, ValueError):
+                        continue
+                    if not math.isfinite(raw_start) or not math.isfinite(raw_end):
+                        continue
+                    word_start = round(max(start, raw_start), 3)
+                    word_end = round(min(end, raw_end), 3)
+                    word_text = str(getattr(word, "word", "")).strip()
+                    if word_text and word_end > word_start:
+                        words.append(
+                            {"start": word_start, "end": word_end, "text": word_text}
+                        )
+                if words:
+                    row["words"] = words
+                rows.append(row)
             _emit(
                 progress,
                 f"Transcribing speech ({effective['model']}, {effective['language']})",
@@ -528,7 +548,7 @@ def _groq(
                 data = {
                     "model": effective["groq_model"],
                     "response_format": "verbose_json",
-                    "timestamp_granularities[]": "segment",
+                    "timestamp_granularities[]": ["segment", "word"],
                 }
                 if effective["language"] != "auto":
                     data["language"] = effective["language"]
@@ -573,18 +593,42 @@ def _groq(
                 segments = payload.get("segments", [])
                 if not segments and payload.get("text", "").strip():
                     segments = [{"start": 0, "end": length, "text": payload["text"]}]
+                timed_words = []
+                for word in payload.get("words", []):
+                    try:
+                        word_start = float(word["start"])
+                        word_end = float(word["end"])
+                        word_text = str(word.get("word", "")).strip()
+                    except (KeyError, TypeError, ValueError):
+                        continue
+                    if (
+                        math.isfinite(word_start)
+                        and math.isfinite(word_end)
+                        and 0 <= word_start < word_end <= length + 0.05
+                        and word_text
+                    ):
+                        timed_words.append((word_start, word_end, word_text))
                 for segment in segments:
-                    start = max(offset, offset + float(segment["start"]))
-                    end = min(duration, offset + length, offset + float(segment["end"]))
+                    local_start = float(segment["start"])
+                    local_end = float(segment["end"])
+                    start = max(offset, offset + local_start)
+                    end = min(duration, offset + length, offset + local_end)
                     text = str(segment.get("text", "")).strip()
                     if text and end > start:
-                        rows.append(
+                        row = {"start": round(start, 3), "end": round(end, 3), "text": text}
+                        words = [
                             {
-                                "start": round(start, 3),
-                                "end": round(end, 3),
-                                "text": text,
+                                "start": round(offset + max(local_start, a), 3),
+                                "end": round(offset + min(local_end, b), 3),
+                                "text": word_text,
                             }
-                        )
+                            for a, b, word_text in timed_words
+                            if local_start <= (a + b) / 2 < local_end
+                            and min(local_end, b) > max(local_start, a)
+                        ]
+                        if words:
+                            row["words"] = words
+                        rows.append(row)
                 audio.unlink(missing_ok=True)
     _emit(progress, "Captions ready", 99)
     return rows

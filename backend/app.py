@@ -2096,6 +2096,10 @@ def correct_transcript(project_id: str, body: TranscriptInput):
                     400, "Transcript correction cannot change segment timestamps."
                 )
             row["text"] = row["text"].strip()
+            # Keep alignment for untouched segments. Edited speech needs fresh
+            # alignment; retaining its old words would show stale captions.
+            if row["text"] == previous.get("text", "") and previous.get("words"):
+                row["words"] = previous["words"]
         if rows != original:
             target["transcript"] = rows
             # Rendered automatic captions are now stale; manual caption overlays remain valid.

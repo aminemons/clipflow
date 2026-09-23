@@ -97,7 +97,34 @@ def _clean_transcript(transcript: Any) -> list[dict[str, Any]]:
             or not text
         ):
             continue
-        rows.append({"start": max(0.0, start), "end": max(0.0, end), "text": text})
+        row = {"start": max(0.0, start), "end": max(0.0, end), "text": text}
+        words: list[dict[str, Any]] = []
+        raw_words = raw.get("words")
+        if isinstance(raw_words, list):
+            for raw_word in raw_words:
+                if not isinstance(raw_word, dict):
+                    continue
+                try:
+                    word_start = float(raw_word.get("start", 0))
+                    word_end = float(raw_word.get("end", word_start))
+                except (TypeError, ValueError):
+                    continue
+                word_text = str(raw_word.get("text", raw_word.get("word", ""))).strip()
+                if (
+                    math.isfinite(word_start)
+                    and math.isfinite(word_end)
+                    and word_end > word_start
+                    and word_text
+                ):
+                    word_start = max(row["start"], word_start)
+                    word_end = min(row["end"], word_end)
+                    if word_end > word_start:
+                        words.append(
+                            {"start": word_start, "end": word_end, "text": word_text}
+                        )
+        if words:
+            row["words"] = sorted(words, key=lambda word: (word["start"], word["end"]))
+        rows.append(row)
     return sorted(rows, key=lambda row: (row["start"], row["end"]))
 
 
@@ -260,10 +287,31 @@ def _candidate_windows(
             if sentence_context == "keep"
             else [r for r in overlapping if r["start"] >= start and r["end"] <= end]
         )
+        # Keep whole transcript turns where they fit. Word timings can remove
+        # only the non-speech padding around those turns.
+        if sentence_context == "keep" and text_rows:
+            first_words = text_rows[0].get("words", [])
+            last_words = text_rows[-1].get("words", [])
+            if first_words:
+                start = max(start, first_words[0]["start"])
+            if last_words:
+                end = min(end, last_words[-1]["end"])
         text = " ".join(r["text"] for r in text_rows).strip()
         dur = end - start
         if dur < effective_low - 0.05 or dur > effective_high + 0.05:
             continue
+        if text_rows:
+            first_row_words = text_rows[0].get("words") or []
+            last_row_words = text_rows[-1].get("words") or []
+            first_edge = (
+                first_row_words[0]["start"] if first_row_words else text_rows[0]["start"]
+            )
+            last_edge = (
+                last_row_words[-1]["end"] if last_row_words else text_rows[-1]["end"]
+            )
+        else:
+            first_edge, last_edge = start, end
+        complete = start <= first_edge + 0.05 and end >= last_edge - 0.05
         speech = sum(
             max(0.0, min(end, r["end"]) - max(start, r["start"])) for r in text_rows
         )
@@ -284,6 +332,7 @@ def _candidate_windows(
                 "density": density,
                 "info": info,
                 "topic": topic,
+                "complete": complete,
                 "title": title,
             }
         )
@@ -315,11 +364,15 @@ def _rank_candidates(
         # Topic/relevance dominates; speech and lexical variety make silent or
         # repetitive intervals naturally rank below useful passages.
         candidate["score"] = round(
-            0.42 * candidate["topic"]
-            + 0.22 * candidate["density"]
-            + 0.20 * candidate["info"]
-            + 0.10 * candidate["novelty"]
-            + 0.06 * duration_fit,
+            max(
+                0.0,
+                0.42 * candidate["topic"]
+                + 0.22 * candidate["density"]
+                + 0.20 * candidate["info"]
+                + 0.10 * candidate["novelty"]
+                + 0.06 * duration_fit
+                - (0.25 if candidate.get("complete") is False else 0.0),
+            ),
             4,
         )
     return sorted(candidates, key=lambda x: (-x["score"], x["start"]))
@@ -368,6 +421,66 @@ def _select(
     return sorted(selected, key=lambda x: x["start"])
 
 
+def _select_in_rank_order(
+    candidates: list[dict[str, Any]], max_clips: int
+) -> list[dict[str, Any]]:
+    """Apply local overlap/count checks without replacing the provider ranking."""
+    try:
+        limit = max(0, int(max_clips))
+    except (TypeError, ValueError):
+        limit = 0
+    selected: list[dict[str, Any]] = []
+    for candidate in candidates:
+        if len(selected) >= limit:
+            break
+        if any(
+            _overlap(candidate, prior) > 0.1
+            or (candidate["text"] and candidate["text"] == prior["text"])
+            for prior in selected
+        ):
+            continue
+        selected.append(candidate)
+    # The UI consumes clips chronologically; ranking determines which survive.
+    return sorted(selected, key=lambda x: x["start"])
+
+
+def _model_candidate_context(
+    candidates: list[dict[str, Any]], topic: str
+) -> list[dict[str, Any]]:
+    """Balance strong local candidates with coverage of the whole recording."""
+    ranked = _rank_candidates(candidates, topic)
+    selected: list[dict[str, Any]] = []
+
+    def add(candidate: dict[str, Any]) -> bool:
+        if any(_overlap(candidate, prior) > 0.1 for prior in selected):
+            return False
+        selected.append(candidate)
+        return True
+
+    # Reserve ten places for later parts of long sources; the heuristic can
+    # otherwise fill a model request with passages from one dense conversation.
+    for candidate in ranked:
+        add(candidate)
+        if len(selected) >= 20:
+            break
+    source_end = max((float(candidate["end"]) for candidate in ranked), default=0.0)
+    for index in range(10):
+        midpoint = (index + 0.5) / 10 * source_end
+        for candidate in sorted(
+            ranked,
+            key=lambda item: abs((item["start"] + item["end"]) / 2 - midpoint),
+        ):
+            if add(candidate):
+                break
+    for candidate in ranked:
+        if len(selected) >= 30:
+            break
+        add(candidate)
+    # Thirty 300-character excerpts leave ample room below the text adapter's
+    # 100 KB request cap, including escaped Unicode and metadata.
+    return selected
+
+
 def _public(candidate: dict[str, Any]) -> dict[str, Any]:
     text = candidate.get("text", "")
     reason_bits = []
@@ -377,6 +490,8 @@ def _public(candidate: dict[str, Any]) -> dict[str, Any]:
         reason_bits.append("contains sustained speech")
     if candidate.get("info", 0) >= 0.35:
         reason_bits.append("introduces several distinct terms")
+    if candidate.get("complete") is False:
+        reason_bits.append("review the start and end for a cut-off thought")
     reason = "; ".join(reason_bits) or (
         "structural fallback because no transcript keyword matched the topic"
         if candidate.get("topic_terms")
@@ -403,12 +518,18 @@ def _hosted_rank(
     model = config.value("GROQ_HIGHLIGHT_MODEL", "llama-3.3-70b-versatile")
     # Send only bounded candidate text. The model chooses IDs; local
     # timestamps remain authoritative and are checked again below.
-    ranked = _rank_candidates(candidates, topic)
+    ranked = _model_candidate_context(candidates, topic)
     payload_candidates = [
-        {"id": c["id"], "start": c["start"], "end": c["end"], "text": c["text"][:600]}
-        for c in ranked[:120]
+        {
+            "id": candidate["id"],
+            "start": candidate["start"],
+            "end": candidate["end"],
+            "complete": candidate.get("complete", True),
+            "text": candidate["text"][:300],
+        }
+        for candidate in ranked
     ]
-    sent_by_id = {c["id"]: c for c in ranked[:120]}
+    sent_by_id = {c["id"]: c for c in ranked}
     body = {
         "model": model,
         "temperature": 0,
@@ -416,7 +537,13 @@ def _hosted_rank(
         "messages": [
             {
                 "role": "system",
-                "content": 'Return JSON object {"ids":[integer]}; select only useful candidate IDs. Never return timestamps.',
+                "content": (
+                    'Return JSON object {"ids":[integer]}. Rank candidate IDs from best to worst; '
+                    "choose podcast moments with a clear hook, enough context to understand the setup, "
+                    "and a satisfying payoff. Prefer a complete thought and a natural ending; reject "
+                    "clips that start mid-sentence, cut off a punchline, or need missing context. "
+                    "Choose only supplied IDs, return no timestamps, and return at most max_clips IDs."
+                ),
             },
             {
                 "role": "user",
@@ -473,17 +600,40 @@ def _hosted_rank(
                 chosen.append(by_id[item])
         if payload_candidates and not chosen:
             raise HighlightError("Groq returned no valid highlight IDs")
-        return _select(chosen, max_clips, topic)
+        return _select_in_rank_order(chosen, max_clips)
     except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
         raise HighlightError("Groq returned malformed highlight JSON") from exc
 
 
 def _model_rank(candidates, topic, max_clips, provider, progress):
     from .language_models import generate_json
-    ranked = _rank_candidates(candidates, topic)[:120]
+
+    ranked = _model_candidate_context(candidates, topic)
     _cancel(progress, "Ranking transcript passages", 70)
-    data = generate_json(provider, 'Select useful candidate IDs. Return {"ids":[integer]}. Do not invent IDs or timestamps.',
-        {"topic": topic[:500], "max_clips": max_clips, "candidates": [{"id":c["id"], "text":c["text"][:600]} for c in ranked]})
+    data = generate_json(
+        provider,
+        (
+            "Rank candidate IDs from best to worst. Select podcast moments with a clear hook, "
+            "enough context to understand the setup, and a satisfying payoff. Prefer a complete "
+            "thought and natural ending; avoid starts mid-sentence, cut-off punchlines, and clips "
+            'needing missing context. Return only {"ids":[integer]} using supplied IDs, with no '
+            "timestamps, at most max_clips IDs."
+        ),
+        {
+            "topic": topic[:500],
+            "max_clips": max_clips,
+            "candidates": [
+                {
+                    "id": candidate["id"],
+                    "start": candidate["start"],
+                    "end": candidate["end"],
+                    "complete": candidate.get("complete", True),
+                    "text": candidate["text"][:300],
+                }
+                for candidate in ranked
+            ],
+        },
+    )
     ids = data.get("ids")
     if not isinstance(ids, list):
         raise HighlightError("The provider did not return highlight IDs.")
@@ -493,8 +643,10 @@ def _model_rank(candidates, topic, max_clips, provider, progress):
         if type(ident) is int and ident in by_id and by_id[ident] not in chosen:
             chosen.append(by_id[ident])
     if not chosen:
-        raise HighlightError("The provider returned no valid candidates. Try another topic or local analysis.")
-    return _select(chosen, max_clips, topic)
+        raise HighlightError(
+            "The provider returned no valid candidates. Try another topic or local analysis."
+        )
+    return _select_in_rank_order(chosen, max_clips)
 
 
 def suggest_highlights(

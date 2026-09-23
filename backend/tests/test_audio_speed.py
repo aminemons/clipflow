@@ -187,3 +187,30 @@ def test_srt_offsets_include_source_start_and_scale_for_download():
     render = media.srt_for_clip(clip, transcript, for_render=True)
     assert "00:00:00,500 --> 00:00:01,000" in standalone
     assert "00:00:01,000 --> 00:00:02,000" in render
+
+
+def test_word_aligned_caption_renders_with_the_export_pipeline(av_fixture, tmp_path):
+    clip = {
+        "start": 0,
+        "end": 1.6,
+        "framing": "fit",
+        "resolution": 180,
+        "caption_enabled": True,
+    }
+    transcript = [{
+        "start": 0,
+        "end": 1.6,
+        "text": "A timed caption.",
+        "words": [
+            {"start": 0.25, "end": 0.40, "text": "A"},
+            {"start": 0.45, "end": 0.80, "text": "timed"},
+            {"start": 0.85, "end": 1.30, "text": "caption."},
+        ],
+    }]
+    output = tmp_path / "captioned.mp4"
+
+    media.render_clip(av_fixture, clip, output, media.srt_for_clip(clip, transcript, for_render=True))
+
+    assert output.is_file()
+    assert {"video", "audio"} <= _streams(output)
+    assert not output.with_suffix(".caption.ass").exists()
