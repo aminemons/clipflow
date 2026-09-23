@@ -293,7 +293,7 @@ npm test
 Pop-Location
 ```
 
-The current Python suite passes **215 tests**, including the YouTube-unavailable classifier regression fix. Revision `75e558e` is deployed to Vercel and the Azure worker; the worker health check returned HTTP 200 and its deployed code includes the expected `_model_excerpt` marker. An authenticated hosted smoke check completed synthetic upload, automatic clip generation, proof, and export, and showed the resulting download link. Local synthetic-media checks confirmed that Smart and Full-source modes generated and exported 720×1280 H.264/AAC video. These checks do not establish that every provider or social account works live. See [docs/VALIDATION.md](docs/VALIDATION.md) for evidence and limits.
+The current Python suite passes **215 tests**, including the YouTube-unavailable classifier regression fix. Revision `91faa45` is live on Vercel, and the Azure worker has the same application code; its health check returned HTTP 200 and the corrected classifier was checked inside the running container. An authenticated hosted smoke check completed synthetic upload, automatic clip generation, proof, and export, and showed the resulting download link. Local synthetic-media checks confirmed that Smart and Full-source modes generated and exported 720×1280 H.264/AAC video. These checks do not establish that every provider or social account works live. See [docs/VALIDATION.md](docs/VALIDATION.md) for evidence and limits.
 
 To build the Windows package from a prepared build environment:
 
@@ -319,7 +319,7 @@ The application grew through five stages:
 4. **Desktop and hosting:** package the local runtime and deploy the shared frontend/backend architecture behind owner authentication.
 5. **Reliability and handoff:** improve import failures, package verification, onboarding, regression coverage, and setup documentation.
 
-The frontend production deployment and hosted worker have both been updated through revision `75e558e`. Windows package workflow `35893074996` passed and produced the public release ZIP; see [docs/VALIDATION.md](docs/VALIDATION.md) for package evidence.
+The frontend production deployment and hosted worker have both been updated through revision `91faa45`. Windows package workflow `35895195102` passed and produced a [public release ZIP](https://github.com/aminemons/clipflow/releases/tag/desktop-91faa4507c0d75f811a671957f573f9c11a30b9d); see [docs/VALIDATION.md](docs/VALIDATION.md) for package evidence.
 
 ## Current limits and next steps
 

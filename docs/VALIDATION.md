@@ -16,16 +16,17 @@ The 2026-09-23 source changes retain word timing from local Whisper and Groq,
 use it for captions and highlight boundaries, and make model-ranked clip IDs
 honor the provider's order. Provider integration checks used mocked responses;
 no live paid provider request was made. The frontend production deployment
-and Azure worker were updated to revision `75e558e`. The worker health check
-returned HTTP 200, and the deployed code contains the `_model_excerpt` marker.
-Windows package workflow run `35893074996` passed and produced the public
-release ZIP. Its SHA-256 is
-`bfacee1ed25a6642c841ce9e9e07db038369c5f51e63c3d17bff10d50a3dd8eb`.
+and Azure worker were updated through revision `91faa45`. The worker health
+check returned HTTP 200, and its live classifier returned `youtube_unavailable`
+for an unavailable-video error. Windows package workflow `35895195102` passed
+and produced the [public release ZIP](https://github.com/aminemons/clipflow/releases/download/desktop-91faa4507c0d75f811a671957f573f9c11a30b9d/Clipflow-windows-x64.zip).
+Its SHA-256 is
+`98900d6982a4d76aaaf1ea2bdc4a4645ed0d850f219e7253982f653c8297ee59`.
 
 ## Hosted deployment
 
-- Vercel production deployment `Fnwi6JvfeGSpTK213B2DEwBdas1q` is Ready at
-  revision `75e558e`. The Azure worker was rebuilt from the same revision and
+- Vercel production is Ready at revision `91faa45`. The Azure worker was
+  rebuilt with the corrected classifier and
   returned HTTP 200 from its health check.
 - An authenticated hosted smoke check completed synthetic upload, automatic
   clip generation, proof, and export; the resulting download link appeared. This
@@ -43,14 +44,14 @@ release ZIP. Its SHA-256 is
 
 ## Local desktop workflow
 
-- The package build at `43d2460` passed bundle verification and an extracted
+- The package build at `91faa45` passed bundle verification and an extracted
   package self-test. A separate local end-to-end check used a synthetic
   eight-second source: Smart and Full-source modes both generated and exported
   720×1280 H.264/AAC files, confirmed with FFprobe. Temporary test files were
   removed.
-- Windows package workflow `35893074996` passed, and the public release ZIP is
+- Windows package workflow `35895195102` passed, and the public release ZIP is
   available with SHA-256
-  `bfacee1ed25a6642c841ce9e9e07db038369c5f51e63c3d17bff10d50a3dd8eb`.
+  `98900d6982a4d76aaaf1ea2bdc4a4645ed0d850f219e7253982f653c8297ee59`.
 
 ## Remaining limits
 
