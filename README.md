@@ -295,7 +295,9 @@ npm test
 Pop-Location
 ```
 
-The current Python suite passes **218 tests**, including the YouTube-unavailable classifier regression fix. Revision `91faa45` is live on Vercel, and the Azure worker has the same application code; its health check returned HTTP 200. An authenticated hosted smoke check completed synthetic upload, automatic clip generation, proof, and export, and showed the resulting download link. GitHub Actions workflow `35898785902` passed against desktop release `46c42766d9e45fd21c8501243a73262de5f3de84`: it extracted the ZIP to a fresh directory, loaded bundled Whisper Small and Silero VAD, generated a Smart speech clip, and exported H.264 video at 720×1280. The archive is 852,958,557 bytes with SHA-256 `0a1719b8345aebe687971f29f745dd1262c428924ee6adbc4c553c3b6a9f2501`. These checks do not establish that every provider or social account works live. See [docs/VALIDATION.md](docs/VALIDATION.md) for evidence and limits.
+The current Python suite passes **237 tests**; frontend tests and the production build pass. The hosted editor and Azure worker include desktop-assisted YouTube import. A live test signed in, issued a one-use ticket, downloaded a public YouTube video on a local PC, uploaded it to Azure, reached a source-ready project, and removed that test project. An earlier hosted smoke check covered clip generation, preview, and export.
+
+[Windows release workflow 35907285265](https://github.com/aminemons/clipflow/actions/runs/35907285265) passed on revision `267e9d3`: it extracted the package, checked protocol registration, loaded the offline speech runtime, generated a Smart clip, and exported H.264 video. The [release ZIP](https://github.com/aminemons/clipflow/releases/tag/desktop-267e9d3a6e173881bc2a34a1a22602a4992b2541) is 852,976,162 bytes with SHA-256 `4eb6c0ef0aa369b3ccf031debbcab4ddf9a817a669795708014f59012b699817`. These checks do not establish that every external provider or social account works live. See [docs/VALIDATION.md](docs/VALIDATION.md) for evidence and limits.
 
 To build the Windows package from a prepared build environment:
 
@@ -321,13 +323,13 @@ The application grew through five stages:
 4. **Desktop and hosting:** package the local runtime and deploy the shared frontend/backend architecture behind owner authentication.
 5. **Reliability and handoff:** improve import failures, package verification, onboarding, regression coverage, and setup documentation.
 
-The frontend production deployment and hosted worker have both been updated through revision `91faa45`. The corrected Windows package is available through the hosted download and as release `46c42766d9e45fd21c8501243a73262de5f3de84`; its fresh-extraction test passed. See [docs/VALIDATION.md](docs/VALIDATION.md).
+The hosted application and worker contain the desktop handoff from revision `267e9d3`. The matching Windows package is available through **Download desktop** and the [GitHub release](https://github.com/aminemons/clipflow/releases/tag/desktop-267e9d3a6e173881bc2a34a1a22602a4992b2541). See [docs/VALIDATION.md](docs/VALIDATION.md).
 
 ## Current limits and next steps
 
 This release suits a local user or a single hosted owner workspace. It is not yet a multi-tenant service.
 
-Hosted YouTube import is currently blocked for some public videos by YouTube's challenge against the Azure worker IP. A single cookie-free PO-token-provider test still received the same challenge. Use the desktop importer or upload a local copy when this happens; Clipflow does not request your YouTube account cookies or route media through an unverified proxy.
+YouTube can still challenge the Azure worker IP. The hosted editor now offers **Import with desktop** when that happens; the desktop app downloads over your connection and sends the source to your web workspace. You can also upload a local copy. Clipflow does not request your YouTube account cookies or route media through an unverified downloader site.
 
 The next useful improvements would be:
 

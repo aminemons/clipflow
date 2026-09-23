@@ -1,69 +1,32 @@
 # Validation record
 
-Evidence current through 2026-09-23. This record distinguishes completed checks
-from remaining release and provider limits.
+Evidence current through 2026-09-23. This records what was exercised, not a guarantee that every external service will remain available.
 
-## Automated checks
+## Source and build checks
 
-- Full Python suite on the current source, including the YouTube-unavailable classifier regression fix: **218 passed**.
-- Frontend subtitle and clip-library tests passed; production build passed.
-- Desktop bundle verification (`verify_bundle`) and packaged `--self-test` passed.
-- A real FFmpeg render test passed with word-timed captions in the export path.
-- A synthetic spoken WAV passed through the bundled offline Whisper Small model:
-  two segments and 11 aligned words were returned without a network request.
+- The full Python suite passed: **237 tests**. Frontend tests and the production build passed.
+- [Source CI](https://github.com/aminemons/clipflow/actions/runs/35906942615) passed on revision `267e9d3`.
+- A public YouTube video downloaded successfully through the desktop import code on a local Windows connection. The resulting MP4 was 533,932 bytes.
+- The desktop-import tests cover URL and quality validation, ticket expiry and replay, bearer authentication, upload limits, and project creation. Live paid-provider calls were not part of these checks.
 
-The 2026-09-23 source changes retain word timing from local Whisper and Groq,
-use it for captions and highlight boundaries, and make model-ranked clip IDs
-honor the provider's order. Provider integration checks used mocked responses;
-no live paid provider request was made. The frontend production deployment
-and Azure worker were updated through revision `91faa45`. The worker health
-check returned HTTP 200, and its live classifier returned `youtube_unavailable`
-for an unavailable-video error. Windows release workflow `35898785902` passed
-for source revision `46c42766d9e45fd21c8501243a73262de5f3de84`. It produced the
-[public release ZIP](https://github.com/aminemons/clipflow/releases/download/desktop-46c42766d9e45fd21c8501243a73262de5f3de84/Clipflow-windows-x64.zip),
-852,958,557 bytes, SHA-256
-`0a1719b8345aebe687971f29f745dd1262c428924ee6adbc4c553c3b6a9f2501`.
+## Hosted import
 
-## Hosted deployment
+- The [hosted editor](https://clipflow-aminemons.vercel.app) and Azure worker include revision `267e9d3`. After deployment the worker health check passed.
+- Azure still received a YouTube bot challenge for public video `jNQXAC9IVRw` through both the ordinary and browser-style yt-dlp requests. The site presents **Import with desktop** for this case rather than treating the blocked request as a successful import.
+- A live authenticated handoff test signed in, created a one-use ticket, downloaded that video on the local PC, uploaded it to the Azure worker, and confirmed the hosted project reached `source_ready`. The test project was then deleted. The PC's DNS resolver was intermittently failing, so this test used a temporary per-process DNS mapping for the app hostnames; no system DNS setting was changed.
+- An earlier hosted smoke test covered upload, automatic clip generation, proof, and export. It confirmed the export download link appeared, but did not play the resulting hosted MP4.
+- The public [Cobalt API](https://github.com/imputnet/cobalt/blob/main/docs/api.md) is not a supported backend: its operators do not permit other projects to use their hosted instance without permission. Hosting it on the same Azure VM would retain the blocked egress IP.
 
-- Vercel production is Ready at revision `91faa45`. The Azure worker was
-  rebuilt with the corrected classifier and
-  returned HTTP 200 from its health check.
-- An authenticated hosted smoke check completed synthetic upload, automatic
-  clip generation, proof, and export; the resulting download link appeared. This
-  does not confirm playback of a downloaded file.
-- YouTube hosted downloads can still encounter provider anti-bot blocks. A live
-  request for public video `jNQXAC9IVRw` returned a bot prompt after a bounded
-  retry. An isolated, cookie-free `bgutil` 2.0.0 PO-token-provider test against
-  the same video also returned the bot prompt. The test containers and network
-  were removed; the production worker remained healthy. Hosted import
-  availability is not considered resolved.
-- A public [Cobalt API](https://github.com/imputnet/cobalt/blob/main/docs/api.md)
-  instance is not a supported backend: its operators do not permit use by other
-  projects without permission. Self-hosting it on this Azure VM would still use
-  the same blocked egress IP.
+## Windows release
 
-## Local desktop workflow
+- [Windows release workflow 35907285265](https://github.com/aminemons/clipflow/actions/runs/35907285265) passed on revision `267e9d3`. It extracted the ZIP into a fresh directory, launched the packaged application, verified `clipflow://` registration, generated a Smart clip with bundled offline speech models, and exported a 720×1280 H.264 MP4.
+- The [release ZIP](https://github.com/aminemons/clipflow/releases/tag/desktop-267e9d3a6e173881bc2a34a1a22602a4992b2541) is 852,976,162 bytes; SHA-256: `4eb6c0ef0aa369b3ccf031debbcab4ddf9a817a669795708014f59012b699817`.
+- The hosted **Download desktop** endpoint reports the same ZIP size and served a ranged request with HTTP 206 and ZIP header bytes.
+- The packaged GUI was not opened manually on this PC because it lacked space for both the archive and a fresh extraction. The CI extraction and application-level checks passed, but do not replace a human GUI check on a second PC.
 
-- The corrected package copies the FFmpeg executables and required adjacent
-  libraries instead of relying on a build-machine Chocolatey shim.
-- GitHub Actions extracted the ZIP into a fresh directory and ran its packaged
-  workflow. The offline Whisper Small model and Silero VAD loaded; automatic
-  Smart speech clipping completed, then the app rendered an H.264 720×1280
-  export. The downloaded file itself was not played on a physical Windows PC.
-- The hosted **Download desktop** button is visible and serves this verified ZIP.
-  The same archive is available from the
-  [GitHub release](https://github.com/aminemons/clipflow/releases/tag/desktop-46c42766d9e45fd21c8501243a73262de5f3de84).
+## Operational limits
 
-## Remaining limits
-
-- Hosted mode is single-owner and single-worker. Worker restarts interrupt
-  running work and sign the owner out; persistent storage and recovery still
-  require operational monitoring.
-- YouTube availability depends on upstream behavior and may be blocked by
-  anti-bot checks.
-- Local transcription depends on available memory and the selected model;
-  visual tracking and free highlight ranking are heuristic.
-- The original assessment password was rotated. The current shared credentials
-  are published in the README at the owner's request; this workspace should
-  contain only non-private test material.
+- YouTube can also challenge a home connection. The desktop handoff is a tested alternate route, not a guarantee against future upstream changes. Uploading a video file remains available.
+- Hosted mode is single-owner and single-worker. Worker restarts interrupt active jobs and require a new sign-in; storage and recovery need monitoring.
+- Local transcription depends on available memory and the selected model. Visual tracking and free highlight ranking remain heuristic; they do not guarantee a viral result.
+- Publishing integrations and paid AI providers were not exercised against live accounts in these checks. The assessment credentials in the README were published at the owner's request and should not be used for private material.
