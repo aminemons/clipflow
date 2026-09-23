@@ -45,4 +45,6 @@ from remaining release and provider limits.
   anti-bot checks.
 - Local transcription depends on available memory and the selected model;
   visual tracking and free highlight ranking are heuristic.
-- The shared public assessment password was removed and rotated.
+- The original assessment password was rotated. The current shared credentials
+  are published in the README at the owner's request; this workspace should
+  contain only non-private test material.

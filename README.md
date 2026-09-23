@@ -6,18 +6,25 @@ Clipflow was built for a full-stack developer assessment. The core workflow uses
 
 ## Try the hosted version
 
-Open **[Clipflow](https://clipflow-aminemons.vercel.app)** with credentials supplied privately by the project owner. This is a shared assessment workspace; projects and settings are visible to everyone using that login. The local application does not require an account.
+Open **[Clipflow](https://clipflow-aminemons.vercel.app)** and sign in with the assessment account:
 
-Start with a short video file to try the complete workflow:
+```text
+Email:    boubasala2009@gmail.com
+Password: wpq3Z3E8KmEDpEyWsh4Du-i6l4p8Mb4s
+```
 
-1. Choose **New project** and upload a video.
-2. Review the source, then configure moments, camera behavior, and captions.
-3. Generate clips.
-4. Open a clip, adjust its timing, and edit its captions or framing.
-5. Save the changes and render a preview.
-6. Export an individual MP4 or select several clips for a ZIP download.
+This is a shared assessment workspace. Anyone using these credentials can view, change, or delete its projects. Use a non-private sample video. The local application does not require an account.
 
-You can also choose **Create clips automatically** after importing a source. This starts the configured analysis and creates editable suggestions. Review those suggestions before exporting.
+To test the complete workflow, start with a short horizontal MP4:
+
+1. Choose **New project**, upload the video, and check its source preview.
+2. Choose **Create clips automatically** to get editable suggestions. To test manual control instead, configure moments, camera, and captions before selecting **Generate clips**.
+3. Open a suggestion, rename it, adjust its start or end, and change a caption or camera setting.
+4. Save the edit and render a preview; source playback alone does not show the final crop or effects.
+5. Export one MP4, then select multiple clips and download their ZIP.
+6. Return to **Projects** and permanently delete the test project if you no longer need it.
+
+Review automatic suggestions before exporting. For a quick offline check, download the Windows package from the site's sidebar, extract the full folder, and repeat the upload-to-export flow without signing in.
 
 If the source already has a timed text subtitle track, automatic setup reuses it instead of running speech recognition. For captions burned into the picture, select **Video already has visible captions** before automatic clipping to avoid placing another layer of text over them. Burned-in text cannot be identified reliably from the video metadata alone.
 
@@ -31,7 +38,7 @@ YouTube sometimes blocks requests from datacenter IP addresses. If a link cannot
 
 ## Use the Windows desktop application
 
-Download the Windows ZIP supplied with the release, extract the **entire folder**, and run:
+Sign in to the hosted site and choose **Download desktop** in the sidebar. Extract the **entire folder** from the ZIP and run:
 
 ```text
 Clipflow\Clipflow.exe
