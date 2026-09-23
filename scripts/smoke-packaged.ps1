@@ -92,10 +92,11 @@ try {
   $archive = [System.IO.Compression.ZipFile]::OpenRead($handoff)
   try {
     $names = @($archive.Entries | ForEach-Object FullName)
-    foreach ($expected in @("Premiere.xml", "after-effects.jsx", "captions.srt", "manifest.json", "README.txt", "media/synthetic.mp4")) {
+    foreach ($expected in @("Premiere.xml", "after-effects.jsx", "captions.srt", "manifest.json", "README.txt")) {
       if ($expected -notin $names) { throw "Adobe edit package is missing $expected." }
     }
-    if (@($names | Where-Object { $_ -eq "media/synthetic.mp4" }).Count -ne 1) {
+    $mediaEntries = @($names | Where-Object { $_ -like "media/*.mp4" })
+    if ($mediaEntries.Count -ne 1) {
       throw "Adobe edit package must include the source exactly once."
     }
     $xmlStream = $archive.GetEntry("Premiere.xml").Open()
