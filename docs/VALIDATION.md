@@ -20,7 +20,7 @@ Evidence current through 2026-09-23. This records what was exercised, not a guar
 
 - [Windows release workflow 35917728287](https://github.com/aminemons/clipflow/actions/runs/35917728287) passed on revision `34757cc`. It extracted the ZIP into a fresh directory, launched the packaged application, verified `clipflow://` registration, generated a Smart clip with bundled offline speech models, and exported a 720×1280 H.264 MP4; the Python suite passed 252 tests.
 - The current [Windows release](https://github.com/aminemons/clipflow/releases/tag/desktop-34757cc7baff06ef1934ee37e8f1709835b1b4a5) ZIP is 852,998,084 bytes; SHA-256: `511fa94260f5dd42a0ee562126e36ab5f4cb96c0e8449c83c9a57fc5608a811a`.
-- The hosted **Download desktop** endpoint reports the same ZIP size and served a ranged request with HTTP 206 and ZIP header bytes.
+- The Azure worker downloaded the current release and verified its SHA-256 before replacing the hosted ZIP. The signed-in website shows **Download desktop** enabled; a fresh full browser download was not repeated on this disk-constrained PC.
 - The packaged GUI was not opened manually on this PC because it lacked space for both the archive and a fresh extraction. The CI extraction and application-level checks passed, but do not replace a human GUI check on a second PC.
 
 ## Operational limits
