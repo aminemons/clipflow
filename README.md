@@ -24,7 +24,7 @@ To test the complete workflow, start with a short horizontal MP4:
 5. Export one MP4, then select multiple clips and download their ZIP.
 6. Return to **Projects** and permanently delete the test project if you no longer need it.
 
-Review automatic suggestions before exporting. For a quick offline check, download the Windows package from the site's sidebar, extract the full folder, and repeat the upload-to-export flow without signing in.
+Review automatic suggestions before exporting. The Windows download is temporarily paused while its portable FFmpeg files are corrected and checked against a fresh extraction.
 
 If the source already has a timed text subtitle track, automatic setup reuses it instead of running speech recognition. For captions burned into the picture, select **Video already has visible captions** before automatic clipping to avoid placing another layer of text over them. Burned-in text cannot be identified reliably from the video metadata alone.
 
@@ -38,7 +38,7 @@ YouTube sometimes blocks requests from datacenter IP addresses. If a link cannot
 
 ## Use the Windows desktop application
 
-Sign in to the hosted site and choose **Download desktop** in the sidebar. Extract the **entire folder** from the ZIP and run:
+When the Windows package passes the fresh-extraction check, sign in to the hosted site and choose **Download desktop** in the sidebar. Extract the **entire folder** from the ZIP and run:
 
 ```text
 Clipflow\Clipflow.exe
@@ -319,7 +319,7 @@ The application grew through five stages:
 4. **Desktop and hosting:** package the local runtime and deploy the shared frontend/backend architecture behind owner authentication.
 5. **Reliability and handoff:** improve import failures, package verification, onboarding, regression coverage, and setup documentation.
 
-The frontend production deployment and hosted worker have both been updated through revision `91faa45`. Windows package workflow `35895195102` passed and produced a [public release ZIP](https://github.com/aminemons/clipflow/releases/tag/desktop-91faa4507c0d75f811a671957f573f9c11a30b9d); see [docs/VALIDATION.md](docs/VALIDATION.md) for package evidence.
+The frontend production deployment and hosted worker have both been updated through revision `91faa45`. The earlier Windows package passed startup checks but failed a new fresh-extraction FFmpeg test, so its download is paused. The corrected package is being validated; see [docs/VALIDATION.md](docs/VALIDATION.md).
 
 ## Current limits and next steps
 

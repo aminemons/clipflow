@@ -49,9 +49,10 @@ Its SHA-256 is
   eight-second source: Smart and Full-source modes both generated and exported
   720×1280 H.264/AAC files, confirmed with FFprobe. Temporary test files were
   removed.
-- Windows package workflow `35895195102` passed, and the public release ZIP is
-  available with SHA-256
-  `98900d6982a4d76aaaf1ea2bdc4a4645ed0d850f219e7253982f653c8297ee59`.
+- The new fresh-extraction smoke caught a Chocolatey FFmpeg shim in the Windows
+  ZIP: it could not run outside the build machine. The download is paused. A
+  corrected build now copies the actual FFmpeg binaries and must generate and
+  export a clip before its release is published.
 
 ## Remaining limits
 
