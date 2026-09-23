@@ -357,6 +357,11 @@ def analyze_segments(
             cut = min(duration, t + target)
         starts.append(cut)
         t = cut
+    # Keep the full source covered. A final fragment shorter than one second
+    # is not useful as a standalone clip, so absorb it into the preceding one
+    # instead of dropping it in the minimum-length filter below.
+    if len(starts) > 2 and duration - starts[-2] < 1:
+        starts.pop(-2)
     segments = [
         (starts[i], starts[i + 1])
         for i in range(len(starts) - 1)

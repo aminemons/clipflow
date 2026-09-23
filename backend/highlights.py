@@ -12,6 +12,8 @@ from __future__ import annotations
 import json
 import math
 import re
+import unicodedata
+from collections import Counter
 from pathlib import Path
 from typing import Any, Callable
 
@@ -21,7 +23,7 @@ from . import config, media
 
 
 Progress = Callable[..., Any]
-_WORD_RE = re.compile(r"[\w']+", re.UNICODE)
+_WORD_RE = re.compile(r"[\w'\u0651]+", re.UNICODE)
 _STOPWORDS = {
     "a",
     "an",
@@ -56,6 +58,18 @@ _STOPWORDS = {
     "with",
     "you",
     "your",
+    # Frequent Arabic function words. Keep this list conservative: these
+    # tokens are removed only from ranking features, never from displayed text.
+    "في",
+    "من",
+    "على",
+    "الى",
+    "عن",
+    "ان",
+    "هذا",
+    "هذه",
+    "الذي",
+    "التي",
 }
 
 
@@ -129,7 +143,25 @@ def _clean_transcript(transcript: Any) -> list[dict[str, Any]]:
 
 
 def _words(text: str) -> list[str]:
-    return [x.lower() for x in _WORD_RE.findall(text) if x.lower() not in _STOPWORDS]
+    # Arabic transcript/query text can differ only by optional vowel marks,
+    # tatweel, or alef-hamza spelling. Normalize those for lexical scoring
+    # while preserving other letters that may distinguish word meanings.
+    normalized = unicodedata.normalize("NFKC", str(text)).replace("ـ", "")
+    normalized = "".join(
+        char
+        for char in normalized
+        if not (
+            unicodedata.category(char).startswith("M")
+            and char != "ّ"
+            and (
+                0x064B <= ord(char) <= 0x065F
+                or ord(char) == 0x0670
+                or 0x06D6 <= ord(char) <= 0x06ED
+            )
+        )
+    ).translate(str.maketrans({"أ": "ا", "إ": "ا", "آ": "ا", "ٱ": "ا"}))
+    words = [word.lower() for word in _WORD_RE.findall(normalized)]
+    return [word for word in words if word.replace("ّ", "") not in _STOPWORDS]
 
 
 def _topic_terms(topic: str) -> set[str]:
@@ -144,13 +176,6 @@ def _topic_score(text: str, terms: set[str]) -> float:
     # perfect hit after only three incidental words.  Five keeps a one-word
     # topic exact while making longer prompts earn their relevance score.
     return min(1.0, len(words & terms) / max(1.0, min(5.0, len(terms))))
-
-
-def _novelty(text: str, prior: set[str]) -> float:
-    words = set(_words(text))
-    if not words:
-        return 0.0
-    return len(words - prior) / len(words)
 
 
 def _safe_target(target: float, tolerance: float) -> tuple[float, float, float]:
@@ -343,13 +368,22 @@ def _rank_candidates(
     candidates: list[dict[str, Any]], topic: str
 ) -> list[dict[str, Any]]:
     terms = _topic_terms(topic)
-    seen: set[str] = set()
-    for candidate in candidates:
+    token_sets = [set(_words(candidate["text"])) for candidate in candidates]
+    document_frequency = Counter(
+        word for candidate_words in token_sets for word in candidate_words
+    )
+    for candidate, words in zip(candidates, token_sets):
         text = candidate["text"]
         candidate["topic"] = _topic_score(text, terms)
         candidate["topic_terms"] = bool(terms)
-        candidate["novelty"] = _novelty(text, seen)
-        seen.update(_words(text))
+        # Score term rarity across the full candidate set, independent of
+        # chronological iteration order. Prefix accumulation favored the
+        # first window when adjacent candidates contained repeated wording.
+        candidate["novelty"] = (
+            sum(1.0 / document_frequency[word] for word in words) / len(words)
+            if words
+            else 0.0
+        )
         target = candidate.get("target")
         try:
             target_value = float(target)
@@ -391,15 +425,17 @@ def _select(
     except (TypeError, ValueError):
         limit = 0
     ranked = _rank_candidates(candidates, topic)
-    # With no speech (or no transcript), every interval has the same evidence.
-    # Pick temporal quantiles so structural fallback samples the source rather
-    # than returning the first adjacent windows.
-    if ranked and max(float(c.get("score", 0.0)) for c in ranked) <= 0.02:
+    # Duration fit gives silent candidates a nonzero score, so a score cutoff
+    # cannot identify a missing transcript. Sample the full timeline instead.
+    if ranked and not any(c["text"].strip() for c in ranked):
         by_time = sorted(ranked, key=lambda x: x["start"])
         spread: list[dict[str, Any]] = []
         for index in range(min(limit, len(by_time))):
             wanted = (index + 0.5) / max(1, limit) * max(c["end"] for c in by_time)
-            options = [c for c in by_time if c not in spread]
+            options = [
+                c for c in by_time
+                if all(_overlap(c, prior) <= 0.1 for prior in spread)
+            ]
             if options:
                 spread.append(
                     min(

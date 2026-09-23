@@ -36,6 +36,7 @@ from .media import (
 from .store import Store, utc_now
 from .source_probe import (
     YouTubeSourceError,
+    classify_youtube_error,
     extract_youtube,
     format_selector,
     probe_youtube,
@@ -423,6 +424,7 @@ def _run_job(item: dict, fn, *args):
                 if project and project.get("active_job_id") == item["id"]:
                     project.pop("active_job_id", None)
                     store.save(project)
+            _cleanup_failed_youtube_project(item)
         with jobs_lock:
             cancel_events.pop(item["id"], None)
         return
@@ -474,8 +476,37 @@ def _run_job(item: dict, fn, *args):
                 if project and project.get("active_job_id") == item["id"]:
                     project.pop("active_job_id", None)
                     store.save(project)
+            _cleanup_failed_youtube_project(item)
         with jobs_lock:
             cancel_events.pop(item["id"], None)
+
+
+def _cleanup_failed_youtube_project(item: dict) -> None:
+    """Discard only an unready YouTube import stub after failure or cancel."""
+    if (
+        item.get("kind") != "youtube_job"
+        or item.get("status") not in {"error", "cancelled"}
+        or not item.get("project_id")
+    ):
+        return
+    project_id = safe_identifier(item["project_id"])
+    with projects_lock:
+        project = store.get(project_id)
+        if not project:
+            return
+        # Imports are not opened in the editor until ready. Preserve anything
+        # that has since acquired real media or user edits; remove only the
+        # zero-duration project shell created by youtube_project().
+        if (
+            project.get("title") != "YouTube import"
+            or not project.get("source_origin_url")
+            or project.get("duration") != 0
+            or project.get("clips") != []
+            or project.get("active_job_id")
+        ):
+            return
+        _remove_project_media(project_id)
+        store.delete(project_id)
 
 
 def check_cancelled(item: dict):
@@ -1413,12 +1444,12 @@ def inspect_youtube_source(body: YouTubeInspectInput):
         raise HTTPException(400, str(exc)) from exc
     except YouTubeSourceError as exc:
         raise HTTPException(502, detail=exc.as_dict()) from exc
-    except RuntimeError as exc:
-        raise HTTPException(502, str(exc)) from exc
     except Exception as exc:
-        # yt-dlp exposes provider/network errors as several exception types.
-        # Keep provider details useful to the UI while avoiding a server 500.
-        raise HTTPException(502, f"Could not inspect YouTube video: {str(exc)[:500]}") from exc
+        # Unexpected yt-dlp/provider errors can include signed media URLs,
+        # request details, or session data. Return the same safe diagnosis
+        # used by the importer instead of exposing provider text to the UI.
+        classified = classify_youtube_error(exc, "inspect")
+        raise HTTPException(502, detail=classified.as_dict()) from exc
 
 
 @app.post("/api/projects/youtube")
@@ -1427,6 +1458,11 @@ def youtube_project(body: YouTubeInput):
         normalized_url = validate_youtube_url(body.url)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
+    pid = _create_youtube_import_project(normalized_url, body.quality)
+    return submit(pid, youtube_job, pid, normalized_url, body.target_duration, body.quality)
+
+
+def _create_youtube_import_project(normalized_url: str, quality: int) -> str:
     pid = store.create_id()
     project = store.save(
         {
@@ -1442,12 +1478,12 @@ def youtube_project(body: YouTubeInput):
             "transcript": [],
             "created_at": utc_now(),
             "source_origin_url": normalized_url,
-            "source_quality": body.quality,
+            "source_quality": quality,
         }
     )
     # Placeholder extension is replaced by the downloader; this file is not served until ready.
     (store.files / f"{pid}.mp4").touch()
-    return submit(pid, youtube_job, pid, normalized_url, body.target_duration, body.quality)
+    return pid
 
 
 @app.post("/api/projects/demo")
@@ -1535,6 +1571,41 @@ def retry_job(job_id: str):
     handler = handlers.get(old.get("kind"))
     if not handler:
         raise HTTPException(400, "job type cannot be retried")
+    if old.get("kind") == "youtube_job":
+        args = old.get("args")
+        if not isinstance(args, list) or len(args) != 4:
+            raise HTTPException(400, "YouTube import retry data is invalid")
+        source_project_id, url, target, quality = args
+        if (
+            not isinstance(source_project_id, str)
+            or not isinstance(old.get("project_id"), str)
+            or source_project_id != old.get("project_id")
+        ):
+            raise HTTPException(400, "YouTube import retry data is invalid")
+        try:
+            source_project_id = safe_identifier(source_project_id)
+            normalized_url = validate_youtube_url(url)
+            format_selector(quality)
+        except (HTTPException, ValueError) as exc:
+            raise HTTPException(400, "YouTube import retry data is invalid") from exc
+        if (
+            isinstance(target, bool)
+            or not isinstance(target, (int, float))
+            or not math.isfinite(target)
+            or not 5 <= target <= 300
+        ):
+            raise HTTPException(400, "YouTube import retry data is invalid")
+        project_id = source_project_id
+        if not store.get(project_id):
+            project_id = _create_youtube_import_project(normalized_url, quality)
+        return submit(
+            project_id,
+            youtube_job,
+            project_id,
+            normalized_url,
+            target,
+            quality,
+        )
     return submit(old.get("project_id"), handler, *old.get("args", []))
 
 

@@ -79,6 +79,29 @@ def test_generation_appends_new_clips_and_uses_cached_speech(monkeypatch, tmp_pa
     assert saved["edit_revision"] == 1
 
 
+def test_smart_uses_speech_by_default_while_full_covers_the_source(monkeypatch, tmp_path):
+    store, project = _runtime(monkeypatch, tmp_path)
+    transcript = [{"start": 10, "end": 15, "text": "The key point."}]
+    _suggestion(monkeypatch, expected_transcript=transcript)
+    monkeypatch.setattr(app.media, "probe", lambda _: {"streams": [
+        {"codec_type": "video"}, {"codec_type": "audio"}]})
+    monkeypatch.setattr(app.speech, "transcribe", lambda *_args: transcript)
+    monkeypatch.setattr(app, "analyze_segments", lambda *_args: [
+        (0, 5), (5, 10), (10, 15), (15, 20)])
+
+    generate_clips(app, {"id": "smart"}, project["id"], {
+        "mode": "smart", "target_duration": 5, "max_clips": 1,
+    })
+    assert [(c["start"], c["end"]) for c in store.get(project["id"])["clips"][1:]] == [
+        (10, 15)]
+
+    generate_clips(app, {"id": "full"}, project["id"], {
+        "mode": "full", "target_duration": 5, "max_clips": 1,
+    })
+    assert [(c["start"], c["end"]) for c in store.get(project["id"])["clips"][2:]] == [
+        (0, 5), (5, 10), (10, 15), (15, 20)]
+
+
 def test_generation_cancellation_does_not_commit_a_partial_batch(monkeypatch, tmp_path):
     store, project = _runtime(monkeypatch, tmp_path)
     _suggestion(monkeypatch)
@@ -95,7 +118,7 @@ def test_generation_cancellation_does_not_commit_a_partial_batch(monkeypatch, tm
         generate_clips(
             app, {"id": "job-2"}, project["id"],
             {"mode": "smart", "target_duration": 5, "max_clips": 1,
-             "provider": "local"},
+             "provider": "local", "use_transcript": False},
         )
     after = store.get(project["id"])
     assert after["clips"] == before["clips"]
@@ -117,7 +140,7 @@ def test_generation_rejects_stale_revision_without_overwriting_edits(monkeypatch
         generate_clips(
             app, {"id": "job-3"}, project["id"],
             {"mode": "smart", "target_duration": 5, "max_clips": 1,
-             "provider": "local"},
+             "provider": "local", "use_transcript": False},
         )
     saved = store.get(project["id"])
     assert len(saved["clips"]) == 1
@@ -141,6 +164,20 @@ def test_automatic_silent_source_produces_visual_clips_without_captions(monkeypa
     assert clip["caption_enabled"] is False
     assert clip["transcript"] == []
     assert "No audio" in job["warning"]
+
+
+def test_untargeted_smart_uses_visual_fallback_for_silent_source(monkeypatch, tmp_path):
+    store, project = _runtime(monkeypatch, tmp_path)
+    _suggestion(monkeypatch, expected_transcript=[])
+    monkeypatch.setattr(app.media, "probe", lambda _: {"streams": [{"codec_type": "video"}]})
+    job = {"id": "silent-smart"}
+
+    generate_clips(app, job, project["id"], {
+        "mode": "smart", "target_duration": 5, "max_clips": 1,
+    })
+
+    assert "No audio" in job["warning"]
+    assert store.get(project["id"])["generation_settings"]["use_transcript"] is False
 
 
 def test_automatic_whisper_oom_falls_back_but_explicit_transcription_fails(monkeypatch, tmp_path):

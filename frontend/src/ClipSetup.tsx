@@ -94,7 +94,7 @@ const defaultSettings: ClipSetupSettings = {
   tolerance: 0.3,
   max_clips: 5,
   topic: "",
-  use_transcript: false,
+  use_transcript: true,
   provider: "local",
   ranges: [],
   camera: {
@@ -141,6 +141,7 @@ function mergeSettings(
 }
 
 type StoredSetupDraft = {
+  version?: number;
   settings?: Partial<ClipSetupSettings>;
   step?: Step;
   rangeStart?: string;
@@ -162,8 +163,14 @@ function readDraft(
       localStorage.getItem(draftKey(projectId));
     if (raw) {
       const stored = JSON.parse(raw) as StoredSetupDraft;
+      // Older drafts inherited the previous speech-off default. Upgrade that
+      // default once so existing projects also get transcript-ranked highlights.
+      const settings = mergeSettings(stored.settings);
+      if (stored.version !== 2 && settings.mode === "smart") {
+        settings.use_transcript = true;
+      }
       return {
-        settings: mergeSettings(stored.settings),
+        settings,
         step:
           stored.step && steps.some((item) => item.id === stored.step)
             ? stored.step
@@ -301,6 +308,7 @@ export default function ClipSetup({
 
   useEffect(() => {
     const value = JSON.stringify({
+      version: 2,
       settings,
       step,
       rangeStart,
@@ -759,7 +767,7 @@ export default function ClipSetup({
                       <span>sec</span>
                     </div>
                   </label>
-                  <label className="clip-setup-field">
+                  {settings.mode === "smart" && <label className="clip-setup-field">
                     <FieldLabel hint="1–20 clips">Maximum clips</FieldLabel>
                     <input
                       type="number"
@@ -776,8 +784,8 @@ export default function ClipSetup({
                         )
                       }
                     />
-                  </label>
-                  <label className="clip-setup-field clip-setup-field-wide">
+                  </label>}
+                  {settings.mode === "smart" && <label className="clip-setup-field clip-setup-field-wide">
                     <FieldLabel hint="Optional">
                       What should we look for?
                     </FieldLabel>
@@ -800,7 +808,7 @@ export default function ClipSetup({
                       A topic automatically turns on speech analysis so Clipflow
                       can find the right words.
                     </small>
-                  </label>
+                  </label>}
                 </div>
               ) : (
                 <div className="clip-setup-manual-ranges">
@@ -907,7 +915,7 @@ export default function ClipSetup({
                   )}
                 </div>
               )}
-              {settings.mode !== "manual" && (
+              {settings.mode === "smart" && (
                 <label className="clip-setup-checkline">
                   <input
                     type="checkbox"
@@ -932,7 +940,7 @@ export default function ClipSetup({
                   </span>
                 </label>
               )}
-              {settings.use_transcript && settings.mode !== "manual" && (
+              {settings.use_transcript && settings.mode === "smart" && (
                 <>
                   <label className="clip-setup-field clip-setup-provider">
                     <FieldLabel

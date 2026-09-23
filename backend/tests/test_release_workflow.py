@@ -199,3 +199,40 @@ def test_local_release_workflow_upload_edit_proof_export_restore_persistence(tmp
     reopened = Store(DATA_ROOT).get(project_id)
     assert [clip["id"] for clip in reopened["clips"]] == [first["id"], second["id"]]
     assert client.get(clip_mp4_url).content == immutable_bytes
+
+
+def test_silent_source_smart_skips_moments_while_full_covers_every_second(tmp_path, isolated_app):
+    source = tmp_path / "silent-source.mp4"
+    subprocess.run(
+        [api.media.FFMPEG, "-y", "-f", "lavfi", "-i", "color=c=blue:s=640x360:r=24",
+         "-t", "12.6", "-c:v", "libx264", "-pix_fmt", "yuv420p", str(source)],
+        check=True, capture_output=True, timeout=30,
+    )
+    with source.open("rb") as stream:
+        upload = client.post("/api/projects/upload", files={
+            "file": (source.name, stream, "video/mp4")})
+    assert upload.status_code == 200, upload.text
+    project_id = wait_job(upload.json()["id"])["project_id"]
+
+    smart = client.post(f"/api/projects/{project_id}/generate", json={
+        "mode": "smart", "target_duration": 5, "max_clips": 1,
+        "camera": {"framing": "fit", "resolution": 360},
+    })
+    assert smart.status_code == 200, smart.text
+    smart_job = wait_job(smart.json()["id"])
+    assert "No audio track" in smart_job["warning"]
+    smart_clips = client.get(f"/api/projects/{project_id}").json()["clips"]
+    assert len(smart_clips) == 1
+
+    full = client.post(f"/api/projects/{project_id}/generate", json={
+        "mode": "full", "target_duration": 5, "max_clips": 1,
+        "camera": {"framing": "fit", "resolution": 360},
+    })
+    assert full.status_code == 200, full.text
+    wait_job(full.json()["id"])
+    clips = client.get(f"/api/projects/{project_id}").json()["clips"]
+    segments = [(clip["start"], clip["end"]) for clip in clips[1:]]
+    assert len(segments) == 3
+    assert segments[0][0] == 0
+    assert segments[-1][1] == pytest.approx(12.6, abs=0.1)
+    assert all(left[1] == right[0] for left, right in zip(segments, segments[1:]))

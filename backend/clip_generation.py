@@ -63,7 +63,7 @@ class GenerateInput(SetupModel):
     tolerance: float = Field(default=.3, ge=.1, le=.5)
     max_clips: int = Field(default=5, ge=1, le=20)
     topic: str = Field(default="", max_length=500)
-    use_transcript: bool = False
+    use_transcript: bool = True
     provider: Literal["local", "groq", "openai", "anthropic", "gemini", "ollama"] = "local"
     ranges: list[TimeRange] = Field(default_factory=list, max_length=100)
     camera: CameraSetup = Field(default_factory=CameraSetup)
@@ -110,6 +110,13 @@ def generate_clips(api, item: dict, project_id: str, payload: dict) -> dict:
     if not transcript and cached.get("options") == speech_options:
         transcript = cached.get("segments", [])
     needs_speech = setup.captions.mode == "auto" or (setup.mode == "smart" and setup.use_transcript)
+    # A silent source or an unavailable local model should not block an
+    # untargeted Smart draft. Topic search and requested captions do require
+    # recognized speech, so those choices still fail with an actionable error.
+    visual_fallback = (
+        setup.mode == "smart" and setup.provider == "local"
+        and not setup.topic.strip() and setup.captions.mode == "none"
+    )
     if needs_speech and not transcript:
         speech_fallback_warning = None
         streams = api.media.probe(source).get("streams", [])
@@ -117,7 +124,7 @@ def generate_clips(api, item: dict, project_id: str, payload: dict) -> dict:
         if transcript:
             item["warning"] = "Used the source's timed subtitles; speech transcription was unnecessary."
         elif not any(s.get("codec_type") == "audio" for s in streams):
-            if not setup.automatic:
+            if not (setup.automatic or visual_fallback):
                 raise RuntimeError("This source has no audio. Turn off speech analysis and automatic captions.")
             setup.use_transcript = False
             setup.captions.mode = "none"
@@ -133,19 +140,26 @@ def generate_clips(api, item: dict, project_id: str, payload: dict) -> dict:
                     speech_options)
             except RuntimeError as error:
                 message = str(error)
-                if not setup.automatic or not (
+                recoverable = (
                     message.startswith("No speech was detected")
                     or message.startswith("Local Whisper ran out of memory")
-                ):
+                    or message.startswith("No local Whisper model is cached")
+                    or (message.startswith("Whisper ") and "not cached" in message)
+                )
+                if not (setup.automatic or visual_fallback) or not recoverable:
                     raise
                 transcript = []
                 if message.startswith("Local Whisper ran out of memory"):
                     speech_fallback_warning = (
                         "Local Whisper ran out of memory: selected visual moments with captions off. "
                         "Close other apps and retry transcription separately.")
-        if not transcript and not setup.automatic:
+                elif "not cached" in message:
+                    speech_fallback_warning = (
+                        "No local speech model is available: selected visual moments. "
+                        "Install a model or configure Groq to rank spoken content.")
+        if not transcript and not (setup.automatic or visual_fallback):
             raise RuntimeError("No speech was recognized. Check the language or choose manual captions.")
-        if not transcript and setup.automatic:
+        if not transcript and (setup.automatic or visual_fallback):
             setup.use_transcript = False
             setup.captions.mode = "none"
             if speech_fallback_warning:

@@ -67,6 +67,69 @@ def test_local_score_prefers_clip_near_requested_duration():
     assert ranked[0]["id"] == 0
 
 
+def test_local_novelty_does_not_depend_on_candidate_iteration_order():
+    candidates = [
+        {
+            "id": index,
+            "start": float(index * 2),
+            "end": float(index * 2 + 4),
+            "duration": 4.0,
+            "target": 4.0,
+            "text": "the same useful passage",
+            "density": 1.0,
+            "info": 0.5,
+        }
+        for index in range(2)
+    ]
+
+    forward = {
+        row["id"]: row["novelty"]
+        for row in highlights._rank_candidates(
+            [dict(candidate) for candidate in candidates], ""
+        )
+    }
+    reverse = {
+        row["id"]: row["novelty"]
+        for row in highlights._rank_candidates(
+            [dict(candidate) for candidate in reversed(candidates)], ""
+        )
+    }
+
+    assert forward == reverse == {0: 0.5, 1: 0.5}
+
+
+def test_arabic_lexical_features_normalize_marks_and_common_function_words():
+    assert highlights._words("إِنَّ هٰذَا مِنَ الْبَيْتِ") == ["البيت"]
+    terms = highlights._topic_terms("إلى البيت")
+    assert highlights._topic_score("هذا عن إِلَى الْبَيْتِ", terms) == 1.0
+    assert highlights._topic_score("البيت", {"البيت"}) == 1.0
+    assert highlights._words("مدرّس") == ["مدرّس"]
+    assert highlights._words("مدرّس") != highlights._words("مدرس")
+
+
+def test_silent_highlights_sample_distinct_parts_of_the_source():
+    candidates = [
+        {
+            "id": index,
+            "start": float(index * 10),
+            "end": float((index + 1) * 10),
+            "duration": 10.0,
+            "target": 10.0,
+            "text": "",
+            "density": 0.0,
+            "info": 0.0,
+        }
+        for index in range(10)
+    ]
+
+    selected = highlights._select(candidates, 3, "")
+
+    assert len(selected) == 3
+    assert selected[0]["start"] < 30
+    assert 30 <= selected[1]["start"] < 70
+    assert selected[2]["start"] >= 70
+
+
 def test_model_rank_order_controls_overlap_and_clip_limit(monkeypatch):
     from backend import language_models
 

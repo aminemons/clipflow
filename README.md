@@ -78,11 +78,19 @@ Importing a source does not automatically cut it into clips.
 
 Choose how to find moments:
 
-- **Smart highlights:** rank candidate passages using the configured analysis.
-- **Full-source splitting:** divide the recording around the target duration.
+- **Smart highlights:** use timed subtitles or transcribe speech, then rank
+  candidate passages and keep up to the requested clip count. It can leave
+  unselected parts of the recording out. With speech analysis turned off, it
+  samples distinct source intervals; that structural fallback cannot judge
+  what was said.
+- **Full-source splitting:** divide the entire recording around the target
+  duration, including its final seconds. It does not rank or drop moments;
+  the clip-count limit applies only to Smart highlights.
 - **Manual ranges:** choose the exact sections to keep.
 
-Set the approximate duration, clip count, framing, and caption options before generating. Use speech-based ranking when you want a topic or instruction to influence highlight selection.
+Set the approximate duration, clip count, framing, and caption options before
+generating. Smart highlights uses speech by default. A topic narrows its
+ranking, while Full-source splitting does not rank the recording.
 
 ### 3. Review and edit
 

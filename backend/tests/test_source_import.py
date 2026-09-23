@@ -312,10 +312,191 @@ def test_source_inspect_rejects_host_and_reports_probe_failure(monkeypatch):
     client = TestClient(api.app)
     invalid = client.post("/api/sources/youtube/inspect", json={"url": "https://example.com/video"})
     assert invalid.status_code == 400
-    monkeypatch.setattr(api, "probe_youtube", lambda _url: (_ for _ in ()).throw(RuntimeError("provider unavailable")))
+    monkeypatch.setattr(
+        api,
+        "probe_youtube",
+        lambda _url: (_ for _ in ()).throw(
+            RuntimeError("HTTP Error 403: https://signed.example/private-token")
+        ),
+    )
     failed = client.post("/api/sources/youtube/inspect", json={"url": "https://youtu.be/abc"})
     assert failed.status_code == 502
-    assert "provider unavailable" in failed.json()["detail"]
+    assert failed.json()["detail"]["code"] == "youtube_provider_error"
+    assert "signed.example" not in str(failed.json()["detail"])
+    assert "private-token" not in str(failed.json()["detail"])
+
+
+def test_failed_youtube_job_discards_only_its_unready_project(monkeypatch, tmp_path: Path):
+    old_store, old_data = api.store, api.DATA
+    old_jobs, old_cancel_events = api.jobs, api.cancel_events
+    try:
+        api.store = Store(tmp_path)
+        api.DATA = tmp_path
+        api.jobs = {}
+        api.cancel_events = {}
+        pid = api.store.create_id()
+        source = api.store.files / f"{pid}.mp4"
+        source.touch()
+        api.store.save(
+            {
+                "id": pid,
+                "title": "YouTube import",
+                "duration": 0,
+                "width": 0,
+                "height": 0,
+                "fps": 0,
+                "source_origin_url": "https://youtu.be/abc",
+                "source_quality": 360,
+                "clips": [],
+            }
+        )
+
+        class FakeYoutubeDL:
+            def __init__(self, _options):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def extract_info(self, _url, download=True):
+                raise RuntimeError("HTTP Error 500: https://signed.example/private-token")
+
+        monkeypatch.setitem(sys.modules, "yt_dlp", types.SimpleNamespace(YoutubeDL=FakeYoutubeDL))
+        item = {"id": "youtube-job", "kind": "youtube_job", "project_id": pid}
+        api._run_job(item, api.youtube_job, pid, "https://youtu.be/abc", 30, 360)
+
+        assert item["status"] == "error"
+        assert api.store.get(pid) is None
+        assert not source.exists()
+        assert "youtube-job" in api.jobs  # Keep the terminal failure visible to polling.
+    finally:
+        api.store, api.DATA = old_store, old_data
+        api.jobs, api.cancel_events = old_jobs, old_cancel_events
+
+
+def test_youtube_metadata_validation_failure_removes_download_and_project(monkeypatch, tmp_path: Path):
+    old_store, old_data = api.store, api.DATA
+    old_jobs, old_cancel_events = api.jobs, api.cancel_events
+    try:
+        api.store = Store(tmp_path)
+        api.DATA = tmp_path
+        api.jobs = {}
+        api.cancel_events = {}
+        pid = api.store.create_id()
+        source = api.store.files / f"{pid}.mp4"
+        source.touch()
+        api.store.save(
+            {
+                "id": pid,
+                "title": "YouTube import",
+                "duration": 0,
+                "width": 0,
+                "height": 0,
+                "fps": 0,
+                "source_origin_url": "https://youtu.be/abc",
+                "source_quality": 360,
+                "clips": [],
+            }
+        )
+
+        class FakeYoutubeDL:
+            def __init__(self, options):
+                self.options = options
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+            def extract_info(self, _url, download=True):
+                assert download is True
+                output = Path(self.options["outtmpl"].replace("%(ext)s", "mp4"))
+                output.write_bytes(b"downloaded but invalid media")
+                return {"title": "Downloaded title"}
+
+        monkeypatch.setitem(sys.modules, "yt_dlp", types.SimpleNamespace(YoutubeDL=FakeYoutubeDL))
+        monkeypatch.setattr(api, "metadata", lambda _path: (0, 0, 0, 0))
+        item = {"id": "youtube-metadata-job", "kind": "youtube_job", "project_id": pid}
+        api._run_job(item, api.youtube_job, pid, "https://youtu.be/abc", 30, 360)
+
+        assert item["status"] == "error"
+        assert api.store.get(pid) is None
+        assert not source.exists()
+        assert list(api.store.files.glob(f"{pid}.download.*")) == []
+    finally:
+        api.store, api.DATA = old_store, old_data
+        api.jobs, api.cancel_events = old_jobs, old_cancel_events
+
+
+def test_retry_youtube_recreates_deleted_import_but_reuses_existing_project(monkeypatch, tmp_path: Path):
+    old_store, old_data = api.store, api.DATA
+    old_jobs, old_cancel_events = api.jobs, api.cancel_events
+    try:
+        api.store = Store(tmp_path)
+        api.DATA = tmp_path
+        missing_id = "missing123"
+        existing_id = "existing123"
+        api.store.save({"id": existing_id, "title": "Existing", "clips": []})
+        api.jobs = {
+            "failed-missing": {
+                "id": "failed-missing",
+                "kind": "youtube_job",
+                "status": "error",
+                "project_id": missing_id,
+                "args": [missing_id, "https://youtu.be/abc", 45, 360],
+            },
+            "failed-existing": {
+                "id": "failed-existing",
+                "kind": "youtube_job",
+                "status": "error",
+                "project_id": existing_id,
+                "args": [existing_id, "https://youtu.be/def", 60, 720],
+            },
+        }
+        api.cancel_events = {}
+
+        class CapturingExecutor:
+            def __init__(self):
+                self.calls = []
+
+            def submit(self, fn, *args):
+                self.calls.append((fn, args))
+
+        executor = CapturingExecutor()
+        monkeypatch.setattr(api, "executor", executor)
+        client = TestClient(api.app)
+
+        recreated = client.post("/api/jobs/failed-missing/retry")
+        assert recreated.status_code == 200
+        new_id = recreated.json()["project_id"]
+        assert new_id != missing_id
+        assert api.store.get(new_id)["source_origin_url"] == "https://youtu.be/abc"
+        assert api.store.get(new_id)["source_quality"] == 360
+        assert executor.calls[0][1][1:] == (
+            api.youtube_job,
+            new_id,
+            "https://youtu.be/abc",
+            45,
+            360,
+        )
+
+        retried = client.post("/api/jobs/failed-existing/retry")
+        assert retried.status_code == 200
+        assert retried.json()["project_id"] == existing_id
+        assert executor.calls[1][1][1:] == (
+            api.youtube_job,
+            existing_id,
+            "https://youtu.be/def",
+            60,
+            720,
+        )
+    finally:
+        api.store, api.DATA = old_store, old_data
+        api.jobs, api.cancel_events = old_jobs, old_cancel_events
 
 
 def test_source_inspect_returns_structured_classified_failure(monkeypatch):
