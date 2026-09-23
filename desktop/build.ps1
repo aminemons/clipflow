@@ -21,6 +21,34 @@ function Assert-UnderRepo([string]$Path, [string]$Label) {
 Assert-UnderRepo $Out "Output"
 Assert-UnderRepo $Work "Work path"
 
+function Resolve-FfmpegBinary([string]$Name) {
+  $command = Get-Command $Name -ErrorAction SilentlyContinue
+  if (!$command) { return $null }
+  $source = [IO.Path]::GetFullPath($command.Source)
+  # Chocolatey exposes shim executables from its bin directory. Bundle the
+  # package's real tools instead; the shims refer to paths on the build host.
+  $chocoRoot = $env:ChocolateyInstall
+  if (!$chocoRoot) { $chocoRoot = Join-Path $env:ProgramData "chocolatey" }
+  $chocoBin = [IO.Path]::GetFullPath((Join-Path $chocoRoot "bin")).TrimEnd('\') + '\'
+  if ($source.StartsWith($chocoBin, [StringComparison]::OrdinalIgnoreCase)) {
+    $packageTools = Join-Path $chocoRoot "lib\ffmpeg\tools"
+    if (Test-Path $packageTools) {
+      $binaryPattern = '[\\/]bin[\\/]'+[regex]::Escape("$Name.exe")+'$'
+      $real = Get-ChildItem -LiteralPath $packageTools -Filter "$Name.exe" -File -Recurse |
+        Where-Object { $_.FullName -match $binaryPattern } |
+        Select-Object -First 1
+      if ($real) { return $real.FullName }
+    }
+    throw "Chocolatey $Name shim was found at '$source', but its real ffmpeg package binary was not found under '$packageTools'."
+  }
+  return $source
+}
+
+function Assert-RunnableFfmpeg([string]$Path, [string]$Label) {
+  & $Path -version *> $null
+  if ($LASTEXITCODE -ne 0) { throw "$Label at '$Path' is not a runnable FFmpeg binary (it may be a package-manager shim)." }
+}
+
 Write-Host "Building Clipflow desktop from $Repo"
 & $Python -m pip install -r (Join-Path $PSScriptRoot "requirements.txt")
 if ($LASTEXITCODE) { throw "Desktop build dependencies failed to install." }
@@ -77,12 +105,19 @@ try {
     throw "Could not fetch the matching Node.js $NodeVersion license notice."
   }
   if (!$WithoutFfmpeg) {
-    $ffmpeg = (Get-Command ffmpeg -ErrorAction SilentlyContinue).Source
-    $ffprobe = (Get-Command ffprobe -ErrorAction SilentlyContinue).Source
+    $ffmpeg = Resolve-FfmpegBinary "ffmpeg"
+    $ffprobe = Resolve-FfmpegBinary "ffprobe"
     if (!$ffmpeg -or !$ffprobe) { throw "FFmpeg and FFprobe were not found on PATH. Install them or rerun with -WithoutFfmpeg." }
+    Assert-RunnableFfmpeg $ffmpeg "FFmpeg"
+    Assert-RunnableFfmpeg $ffprobe "FFprobe"
     $FfmpegDir = Join-Path $Resources "ffmpeg"
     New-Item -ItemType Directory -Path $FfmpegDir -Force | Out-Null
     Copy-Item $ffmpeg,$ffprobe $FfmpegDir
+    # FFmpeg builds may be dynamically linked. Keep their adjacent runtime DLLs.
+    foreach ($binary in @($ffmpeg,$ffprobe)) {
+      Get-ChildItem -LiteralPath (Split-Path -Parent $binary) -Filter "*.dll" -File |
+        Copy-Item -Destination $FfmpegDir -Force
+    }
     # Preserve the complete license notice alongside the redistributable tools.
     $licenseInfo = New-Object System.Diagnostics.ProcessStartInfo
     $licenseInfo.FileName = $ffmpeg

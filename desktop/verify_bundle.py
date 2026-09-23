@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import subprocess
 from pathlib import Path
 
 from backend.speech_assets import (
@@ -17,6 +18,23 @@ def _has_silero_model(assets: Path) -> bool:
         "silero_encoder_v5.onnx",
         "silero_decoder_v5.onnx",
     }.issubset(names)
+
+
+def _is_runnable_tool(path: Path) -> bool:
+    """Reject package-manager shims and broken executables before packaging."""
+    try:
+        result = subprocess.run(
+            [str(path), "-version"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    output = f"{result.stdout}\n{result.stderr}".lower()
+    expected = "ffprobe version" if path.name.lower().startswith("ffprobe") else "ffmpeg version"
+    return result.returncode == 0 and expected in output
 
 
 def bundle_errors(root: Path, *, require_ffmpeg: bool = True) -> list[str]:
@@ -42,6 +60,12 @@ def bundle_errors(root: Path, *, require_ffmpeg: bool = True) -> list[str]:
     for label, path in required.items():
         if not path.is_file():
             errors.append(f"{label}: {path.relative_to(root)}")
+
+    if require_ffmpeg:
+        for label, name in (("FFmpeg", "ffmpeg.exe"), ("FFprobe", "ffprobe.exe")):
+            binary = root / "resources" / "ffmpeg" / name
+            if binary.is_file() and not _is_runnable_tool(binary):
+                errors.append(f"{label}: resources/ffmpeg/{name} is not a runnable bundled binary (package-manager shims are not supported)")
 
     assets = internal / "faster_whisper" / "assets"
     if not _has_silero_model(assets):
