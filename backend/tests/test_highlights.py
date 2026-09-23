@@ -157,10 +157,34 @@ def test_model_candidate_context_is_compact_and_spread_out():
     context = highlights._model_candidate_context(candidates, "")
 
     assert len(context) == 30
-    assert all(len(candidate["text"][:300]) == 300 for candidate in context)
+    assert all(len(candidate["text"]) == 1000 for candidate in context)
     assert all(highlights._overlap(left, right) <= 0.1
                for i, left in enumerate(context) for right in context[i + 1:])
     assert any(candidate["start"] > 180 for candidate in context)
+
+
+def test_model_ranking_receives_the_passage_payoff(monkeypatch):
+    from backend import language_models
+
+    passage = "setup " + ("context " * 200) + "and the answer was forty two"
+    received = {}
+
+    def capture(_provider, _instruction, data):
+        received.update(data)
+        return {"ids": [0]}
+
+    monkeypatch.setattr(language_models, "generate_json", capture)
+    highlights._model_rank(
+        [{"id": 0, "start": 0, "end": 20, "text": passage,
+          "duration": 20, "target": 20, "density": 1.0, "info": 1.0}],
+        "", 1, "openai", None,
+    )
+
+    excerpt = received["candidates"][0]["text"]
+    assert len(excerpt) <= 1200
+    assert excerpt.startswith("setup ")
+    assert "middle omitted" in excerpt
+    assert excerpt.endswith("and the answer was forty two")
 
 
 def test_source_bounds_tolerance_and_no_duplicate_intervals(monkeypatch, tmp_path):

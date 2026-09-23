@@ -77,6 +77,18 @@ class HighlightError(RuntimeError):
     """Raised when hosted ranking is configured but cannot return valid data."""
 
 
+def _model_excerpt(text: str, limit: int = 1200) -> str:
+    """Keep both the hook and payoff visible when a passage is very long."""
+    text = str(text)
+    if len(text) <= limit:
+        return text
+    marker = "\n[… middle omitted …]\n"
+    available = max(0, limit - len(marker))
+    head = (available + 1) // 2
+    tail = available - head
+    return text[:head] + marker + (text[-tail:] if tail else "")
+
+
 def _cancel(
     progress: Progress | None, stage: str = "highlights", value: int = 0
 ) -> None:
@@ -512,8 +524,9 @@ def _model_candidate_context(
         if len(selected) >= 30:
             break
         add(candidate)
-    # Thirty 300-character excerpts leave ample room below the text adapter's
-    # 100 KB request cap, including escaped Unicode and metadata.
+    # Keeping most of each passage lets a text model judge the setup and payoff
+    # together. Thirty excerpts of at most 1,200 Unicode characters plus
+    # metadata remain comfortably below the adapter's 100 KB request cap.
     return selected
 
 
@@ -561,7 +574,7 @@ def _hosted_rank(
             "start": candidate["start"],
             "end": candidate["end"],
             "complete": candidate.get("complete", True),
-            "text": candidate["text"][:300],
+            "text": _model_excerpt(candidate["text"]),
         }
         for candidate in ranked
     ]
@@ -664,7 +677,7 @@ def _model_rank(candidates, topic, max_clips, provider, progress):
                     "start": candidate["start"],
                     "end": candidate["end"],
                     "complete": candidate.get("complete", True),
-                    "text": candidate["text"][:300],
+                    "text": _model_excerpt(candidate["text"]),
                 }
                 for candidate in ranked
             ],
