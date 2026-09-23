@@ -24,7 +24,7 @@ To test the complete workflow, start with a short horizontal MP4:
 5. Export one MP4, then select multiple clips and download their ZIP.
 6. Return to **Projects** and permanently delete the test project if you no longer need it.
 
-Review automatic suggestions before exporting. The Windows download is temporarily paused while its portable FFmpeg files are corrected and checked against a fresh extraction.
+Review automatic suggestions before exporting. The corrected Windows release passed a fresh extraction test and is available through **Download desktop** on the hosted site.
 
 If the source already has a timed text subtitle track, automatic setup reuses it instead of running speech recognition. For captions burned into the picture, select **Video already has visible captions** before automatic clipping to avoid placing another layer of text over them. Burned-in text cannot be identified reliably from the video metadata alone.
 
@@ -38,7 +38,7 @@ YouTube sometimes blocks requests from datacenter IP addresses. If a link cannot
 
 ## Use the Windows desktop application
 
-When the Windows package passes the fresh-extraction check, sign in to the hosted site and choose **Download desktop** in the sidebar. Extract the **entire folder** from the ZIP and run:
+The Windows release passed a fresh-extraction test. Sign in to the hosted site and choose **Download desktop** in the sidebar. Extract the **entire folder** from the ZIP and run:
 
 ```text
 Clipflow\Clipflow.exe
@@ -293,7 +293,7 @@ npm test
 Pop-Location
 ```
 
-The current Python suite passes **215 tests**, including the YouTube-unavailable classifier regression fix. Revision `91faa45` is live on Vercel, and the Azure worker has the same application code; its health check returned HTTP 200 and the corrected classifier was checked inside the running container. An authenticated hosted smoke check completed synthetic upload, automatic clip generation, proof, and export, and showed the resulting download link. Local synthetic-media checks confirmed that Smart and Full-source modes generated and exported 720×1280 H.264/AAC video. These checks do not establish that every provider or social account works live. See [docs/VALIDATION.md](docs/VALIDATION.md) for evidence and limits.
+The current Python suite passes **218 tests**, including the YouTube-unavailable classifier regression fix. Revision `91faa45` is live on Vercel, and the Azure worker has the same application code; its health check returned HTTP 200. An authenticated hosted smoke check completed synthetic upload, automatic clip generation, proof, and export, and showed the resulting download link. GitHub Actions workflow `35898785902` passed against desktop release `46c42766d9e45fd21c8501243a73262de5f3de84`: it extracted the ZIP to a fresh directory, loaded bundled Whisper Small and Silero VAD, generated a Smart speech clip, and exported H.264 video at 720×1280. The archive is 852,958,557 bytes with SHA-256 `0a1719b8345aebe687971f29f745dd1262c428924ee6adbc4c553c3b6a9f2501`. These checks do not establish that every provider or social account works live. See [docs/VALIDATION.md](docs/VALIDATION.md) for evidence and limits.
 
 To build the Windows package from a prepared build environment:
 
@@ -319,7 +319,7 @@ The application grew through five stages:
 4. **Desktop and hosting:** package the local runtime and deploy the shared frontend/backend architecture behind owner authentication.
 5. **Reliability and handoff:** improve import failures, package verification, onboarding, regression coverage, and setup documentation.
 
-The frontend production deployment and hosted worker have both been updated through revision `91faa45`. The earlier Windows package passed startup checks but failed a new fresh-extraction FFmpeg test, so its download is paused. The corrected package is being validated; see [docs/VALIDATION.md](docs/VALIDATION.md).
+The frontend production deployment and hosted worker have both been updated through revision `91faa45`. The corrected Windows package is available through the hosted download and as release `46c42766d9e45fd21c8501243a73262de5f3de84`; its fresh-extraction test passed. See [docs/VALIDATION.md](docs/VALIDATION.md).
 
 ## Current limits and next steps
 

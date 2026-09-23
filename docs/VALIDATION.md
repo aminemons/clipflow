@@ -5,7 +5,7 @@ from remaining release and provider limits.
 
 ## Automated checks
 
-- Full Python suite on the current source, including the YouTube-unavailable classifier regression fix: **215 passed**.
+- Full Python suite on the current source, including the YouTube-unavailable classifier regression fix: **218 passed**.
 - Frontend subtitle and clip-library tests passed; production build passed.
 - Desktop bundle verification (`verify_bundle`) and packaged `--self-test` passed.
 - A real FFmpeg render test passed with word-timed captions in the export path.
@@ -18,10 +18,11 @@ honor the provider's order. Provider integration checks used mocked responses;
 no live paid provider request was made. The frontend production deployment
 and Azure worker were updated through revision `91faa45`. The worker health
 check returned HTTP 200, and its live classifier returned `youtube_unavailable`
-for an unavailable-video error. Windows package workflow `35895195102` passed
-and produced the [public release ZIP](https://github.com/aminemons/clipflow/releases/download/desktop-91faa4507c0d75f811a671957f573f9c11a30b9d/Clipflow-windows-x64.zip).
-Its SHA-256 is
-`98900d6982a4d76aaaf1ea2bdc4a4645ed0d850f219e7253982f653c8297ee59`.
+for an unavailable-video error. Windows release workflow `35898785902` passed
+for source revision `46c42766d9e45fd21c8501243a73262de5f3de84`. It produced the
+[public release ZIP](https://github.com/aminemons/clipflow/releases/download/desktop-46c42766d9e45fd21c8501243a73262de5f3de84/Clipflow-windows-x64.zip),
+852,958,557 bytes, SHA-256
+`0a1719b8345aebe687971f29f745dd1262c428924ee6adbc4c553c3b6a9f2501`.
 
 ## Hosted deployment
 
@@ -44,15 +45,15 @@ Its SHA-256 is
 
 ## Local desktop workflow
 
-- The package build at `91faa45` passed bundle verification and an extracted
-  package self-test. A separate local end-to-end check used a synthetic
-  eight-second source: Smart and Full-source modes both generated and exported
-  720×1280 H.264/AAC files, confirmed with FFprobe. Temporary test files were
-  removed.
-- The new fresh-extraction smoke caught a Chocolatey FFmpeg shim in the Windows
-  ZIP: it could not run outside the build machine. The download is paused. A
-  corrected build now copies the actual FFmpeg binaries and must generate and
-  export a clip before its release is published.
+- The corrected package copies the FFmpeg executables and required adjacent
+  libraries instead of relying on a build-machine Chocolatey shim.
+- GitHub Actions extracted the ZIP into a fresh directory and ran its packaged
+  workflow. The offline Whisper Small model and Silero VAD loaded; automatic
+  Smart speech clipping completed, then the app rendered an H.264 720×1280
+  export. The downloaded file itself was not played on a physical Windows PC.
+- The hosted **Download desktop** button is visible and serves this verified ZIP.
+  The same archive is available from the
+  [GitHub release](https://github.com/aminemons/clipflow/releases/tag/desktop-46c42766d9e45fd21c8501243a73262de5f3de84).
 
 ## Remaining limits
 
