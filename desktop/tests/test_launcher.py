@@ -11,6 +11,32 @@ class _StoppedServer:
         return False
 
 
+class _ServingServer:
+    should_exit = False
+
+
+class _FakeThread:
+    """Capture the serving wait without starting a real API thread."""
+
+    instances: list["_FakeThread"] = []
+
+    def __init__(self, *, target, args, **_kwargs):
+        self.target = target
+        self.args = args
+        self.server = _ServingServer()
+        self.args[1]["server"] = self.server
+        self.join_calls: list[dict] = []
+        self.instances.append(self)
+
+    def start(self):
+        pass
+
+    def join(self, **kwargs):
+        self.join_calls.append(kwargs)
+        if not kwargs:
+            raise LookupError("serve mode should remain attached to the API")
+
+
 def _reset_logger() -> None:
     while launcher.LOGGER.handlers:
         handler = launcher.LOGGER.handlers[0]
@@ -84,6 +110,36 @@ def test_wait_for_health_fails_fast_when_server_thread_reports_error():
             timeout=10,
             server_holder={"error": RuntimeError("backend import failed")},
         )
+
+
+def test_self_test_still_exits_after_health_check(monkeypatch, tmp_path):
+    monkeypatch.setattr(launcher, "_configure_environment", lambda: (tmp_path, tmp_path / "settings.env"))
+    monkeypatch.setattr(launcher, "_configure_logging", lambda _path: tmp_path / "desktop.log")
+    monkeypatch.setattr(launcher, "_assert_frozen_speech_assets", lambda: None)
+    monkeypatch.setattr(launcher, "_run_server", lambda *_args: None)
+    monkeypatch.setattr(launcher.threading, "Thread", _FakeThread)
+    monkeypatch.setattr(launcher, "_wait_for_health", lambda *_args, **_kwargs: {"status": "ok"})
+    _FakeThread.instances.clear()
+
+    assert launcher.run(headless=True, port=43125) == 0
+    assert _FakeThread.instances[0].join_calls == [{"timeout": 5}]
+    assert _FakeThread.instances[0].server.should_exit is True
+
+
+def test_serve_mode_remains_attached_until_api_thread_stops(monkeypatch, tmp_path):
+    monkeypatch.setattr(launcher, "_configure_environment", lambda: (tmp_path, tmp_path / "settings.env"))
+    monkeypatch.setattr(launcher, "_configure_logging", lambda _path: tmp_path / "desktop.log")
+    monkeypatch.setattr(launcher, "_assert_frozen_speech_assets", lambda: None)
+    monkeypatch.setattr(launcher, "_run_server", lambda *_args: None)
+    monkeypatch.setattr(launcher.threading, "Thread", _FakeThread)
+    monkeypatch.setattr(launcher, "_wait_for_health", lambda *_args, **_kwargs: {"status": "ok"})
+    _FakeThread.instances.clear()
+
+    with pytest.raises(LookupError, match="remain attached"):
+        launcher.run(serve=True, port=43126)
+    thread = _FakeThread.instances[0]
+    assert thread.join_calls == [{}, {"timeout": 5}]
+    assert thread.server.should_exit is True
 
 
 def test_frozen_runtime_requires_silero_model(tmp_path, monkeypatch):

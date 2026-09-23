@@ -40,6 +40,7 @@ jobs:
           Expand-Archive -LiteralPath $archive -DestinationPath $extract
           & (Join-Path $extract "Clipflow\Clipflow.exe") --self-test
           if ($LASTEXITCODE -ne 0) { throw "Extracted desktop package failed to start" }
+          .\scripts\smoke-packaged.ps1 -Package (Join-Path $extract "Clipflow")
           Get-FileHash -Algorithm SHA256 -LiteralPath $archive
       - name: Publish verified archive
         shell: pwsh
@@ -47,4 +48,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $tag = "desktop-${{ github.sha }}"
-          gh release create $tag "build\desktop\Clipflow-windows-x64.zip" --title "Clipflow desktop ${{ github.sha }}" --notes "Windows desktop package built from commit ${{ github.sha }}. The source tests, package checks, and self-test from a fresh extraction passed."
+          gh release create $tag "build\desktop\Clipflow-windows-x64.zip" --title "Clipflow desktop ${{ github.sha }}" --notes "Windows desktop package built from commit ${{ github.sha }}. The source tests, package checks, and freshly extracted API, speech-runtime, and H.264 export smoke test passed."

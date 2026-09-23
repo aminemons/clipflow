@@ -227,7 +227,9 @@ def _run_server(port: int, holder: dict[str, object]):
         LOGGER.exception("Clipflow API server failed")
 
 
-def run(*, headless: bool = False, port: int | None = None) -> int:
+def run(
+    *, headless: bool = False, serve: bool = False, port: int | None = None
+) -> int:
     data_dir, _settings_file = _configure_environment()
     _configure_logging(data_dir.parent)
     _assert_frozen_speech_assets()
@@ -245,6 +247,10 @@ def run(*, headless: bool = False, port: int | None = None) -> int:
     try:
         health = _wait_for_health(url, server_holder=server_holder)
         LOGGER.info("Clipflow API ready at %s (%s)", url, health.get("status", "ok"))
+        if serve:
+            print(f"Clipflow desktop API ready at {url}", flush=True)
+            server_thread.join()
+            raise RuntimeError("API stopped unexpectedly")
         if headless:
             print("Clipflow desktop self-test: API ready")
             print(f"Clipflow desktop self-test: {health.get('status', 'ok')}")
@@ -290,11 +296,13 @@ def run(*, headless: bool = False, port: int | None = None) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--headless", "--self-test", action="store_true", help="start the local API, verify health, then exit")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--headless", "--self-test", action="store_true", help="start the local API, verify health, then exit")
+    mode.add_argument("--serve", action="store_true", help="run the local API without opening the desktop window")
     parser.add_argument("--port", type=int, help="development port (default: random loopback port)")
     args = parser.parse_args(argv)
     try:
-        return run(headless=args.headless, port=args.port)
+        return run(headless=args.headless, serve=args.serve, port=args.port)
     except KeyboardInterrupt:
         return 0
     except Exception as exc:
