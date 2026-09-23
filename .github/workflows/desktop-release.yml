@@ -1,0 +1,50 @@
+name: Windows desktop release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install FFmpeg
+        shell: pwsh
+        run: |
+          choco install ffmpeg --yes --no-progress
+          if ($LASTEXITCODE -ne 0) { throw "FFmpeg installation failed" }
+          ffmpeg -version | Select-Object -First 1
+          ffprobe -version | Select-Object -First 1
+      - name: Build and test desktop package
+        shell: pwsh
+        run: |
+          python -m venv .venv
+          .\scripts\release-windows.ps1
+      - name: Check freshly extracted archive
+        shell: pwsh
+        run: |
+          $archive = "build\desktop\Clipflow-windows-x64.zip"
+          $extract = Join-Path $env:RUNNER_TEMP "clipflow-fresh-extract"
+          Expand-Archive -LiteralPath $archive -DestinationPath $extract
+          & (Join-Path $extract "Clipflow\Clipflow.exe") --self-test
+          if ($LASTEXITCODE -ne 0) { throw "Extracted desktop package failed to start" }
+          Get-FileHash -Algorithm SHA256 -LiteralPath $archive
+      - name: Publish verified archive
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "desktop-${{ github.sha }}"
+          gh release create $tag "build\desktop\Clipflow-windows-x64.zip" --title "Clipflow desktop ${{ github.sha }}" --notes "Windows desktop package built from commit ${{ github.sha }}. The source tests, package checks, and self-test from a fresh extraction passed."
