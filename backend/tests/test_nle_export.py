@@ -139,6 +139,15 @@ def test_fractional_rate_is_nominal_ntsc_and_out_is_exclusive(tmp_path):
         assert clip.findtext("out") == str(round(4 * 29.97))
 
 
+def test_source_audio_channel_count_matches_probe(tmp_path):
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"tiny")
+    project = _project()
+    with _archive(stream_package(project, project["clips"], source, has_audio=True, audio_channels=1)) as archive:
+        root = ET.fromstring(archive.read("Premiere.xml"))
+        assert root.findtext(".//file/media/audio/channelcount") == "1"
+
+
 def test_sequence_srt_uses_raw_source_time_when_premiere_omits_speed(tmp_path):
     source = tmp_path / "source.mp4"
     source.write_bytes(b"tiny")
@@ -150,6 +159,16 @@ def test_sequence_srt_uses_raw_source_time_when_premiere_omits_speed(tmp_path):
         jsx = archive.read("after-effects.jsx").decode()
         assert "layer.stretch = 100 / clip.speed" in jsx
         assert "layer.startTime = -clip.start / clip.speed" in jsx
+
+
+def test_disabled_captions_do_not_reappear_from_transcript(tmp_path):
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"tiny")
+    project = _project()
+    project["clips"][0]["caption_enabled"] = False
+    with _archive(stream_package(project, project["clips"], source, has_audio=False)) as archive:
+        assert archive.read("captions.srt") == b""
+        assert '"captions": []' in archive.read("after-effects.jsx").decode()
 
 
 def test_stream_close_cancels_without_staging_archive(tmp_path):

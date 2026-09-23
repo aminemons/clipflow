@@ -2299,13 +2299,15 @@ def edit_package(project_id: str, clip_ids: str | None = None):
         raise HTTPException(400, "Choose at least one clip for the Adobe handoff.")
     source = source_path(project_id)
     source_info = media.probe(source)
-    has_audio = any(
-        stream.get("codec_type") == "audio"
-        for stream in source_info.get("streams", [])
+    audio_stream = next(
+        (stream for stream in source_info.get("streams", []) if stream.get("codec_type") == "audio"),
+        None,
     )
+    has_audio = audio_stream is not None
+    audio_channels = max(1, int(audio_stream.get("channels") or 1)) if audio_stream else 1
     try:
         package_stream = stream_nle_package(
-            project, selected, source, has_audio=has_audio
+            project, selected, source, has_audio=has_audio, audio_channels=audio_channels
         )
     except (ValueError, FileNotFoundError) as exc:
         raise HTTPException(400, str(exc)) from exc

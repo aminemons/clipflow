@@ -70,6 +70,7 @@ def _write_source_file(
     media_name: str,
     fps: Fraction,
     has_audio: bool,
+    audio_channels: int,
 ) -> None:
     file_node = _node(clip_item, "file", id="file-1")
     if index != 1 or media_type != "video":
@@ -96,7 +97,7 @@ def _write_source_file(
 
     if has_audio:
         file_audio = _node(file_media, "audio")
-        _node(file_audio, "channelcount", 2)
+        _node(file_audio, "channelcount", audio_channels)
 
 
 def _write_clip_item(
@@ -110,6 +111,7 @@ def _write_clip_item(
     media_name: str,
     fps: Fraction,
     has_audio: bool,
+    audio_channels: int,
 ) -> None:
     source_in = _frames(clip["start"], fps)
     source_duration = _clip_frames(clip, fps)
@@ -132,6 +134,7 @@ def _write_clip_item(
         media_name=media_name,
         fps=fps,
         has_audio=has_audio,
+        audio_channels=audio_channels,
     )
 
     source_track = _node(item, "sourcetrack")
@@ -141,7 +144,14 @@ def _write_clip_item(
     _node(item, "logginginfo")
 
 
-def _xml(project: dict, clips: list[dict], media_name: str, fps: Fraction, has_audio: bool) -> bytes:
+def _xml(
+    project: dict,
+    clips: list[dict],
+    media_name: str,
+    fps: Fraction,
+    has_audio: bool,
+    audio_channels: int,
+) -> bytes:
     root = ET.Element("xmeml", version="5")
     sequence = _node(root, "sequence")
     _node(sequence, "name", str(project.get("title") or "Clipflow handoff"))
@@ -174,6 +184,7 @@ def _xml(project: dict, clips: list[dict], media_name: str, fps: Fraction, has_a
                 media_name=media_name,
                 fps=fps,
                 has_audio=has_audio,
+                audio_channels=audio_channels,
             )
         # Audio and video items share the same timeline interval.
         timeline_frame += _clip_frames(clip, fps)
@@ -199,6 +210,9 @@ def _sequence_srt(clips: list[dict], project: dict) -> str:
     offset = 0.0
     transcript = project.get("transcript", [])
     for clip in clips:
+        if not clip["captionEnabled"]:
+            offset += float(clip["end"]) - float(clip["start"])
+            continue
         source_transcript = clip.get("transcript", transcript)
         srt = srt_for_clip(clip, source_transcript, for_render=True)
         blocks = re.split(r"\n\s*\n", srt.strip()) if srt.strip() else []
@@ -268,6 +282,8 @@ def _jsx(project_title: str, clips: list[dict], media_name: str) -> str:
 
 
 def _caption_cues(raw: dict, clip: dict, project: dict) -> list[dict]:
+    if not clip["captionEnabled"]:
+        return []
     color = clip["captionColor"]
     text = clip["caption"]
     if text:
@@ -342,6 +358,7 @@ def prepare(project: dict, clips: list[dict], source: Path) -> tuple[list[dict],
             "width": dimensions[0],
             "height": dimensions[1],
             "fps": float(fps),
+            "captionEnabled": bool(caption_enabled),
             "caption": caption_text,
             "captionSize": max(1, int(raw.get("caption_size") or 52)),
             "captionColor": caption_color,
@@ -403,13 +420,19 @@ def _package_readme(project: dict, media_name: str, has_audio: bool) -> str:
     )
 
 
-def _package_parts(project: dict, clips: list[dict], source: Path, has_audio: bool):
+def _package_parts(
+    project: dict,
+    clips: list[dict],
+    source: Path,
+    has_audio: bool,
+    audio_channels: int,
+):
     clean, media_name, fps = prepare(project, clips, source)
     manifest = _manifest(project, clips, media_name)
     title = str(project.get("title") or "Clipflow handoff")
     readme = _package_readme(project, media_name, has_audio)
     content = [
-        ("Premiere.xml", _xml(project, clean, media_name, fps, has_audio)),
+        ("Premiere.xml", _xml(project, clean, media_name, fps, has_audio, audio_channels)),
         ("captions.srt", _sequence_srt(clean, project).encode("utf-8")),
         ("after-effects.jsx", _jsx(title, clean, media_name).encode("utf-8")),
         (
@@ -421,9 +444,18 @@ def _package_parts(project: dict, clips: list[dict], source: Path, has_audio: bo
     return media_name, content
 
 
-def stream_package(project: dict, clips: list[dict], source: Path, *, has_audio: bool):
+def stream_package(
+    project: dict,
+    clips: list[dict],
+    source: Path,
+    *,
+    has_audio: bool,
+    audio_channels: int = 2,
+):
     """Yield a ZIP package without staging a second copy of the source on disk."""
-    media_name, content = _package_parts(project, clips, source, has_audio)
+    media_name, content = _package_parts(
+        project, clips, source, has_audio, max(1, audio_channels)
+    )
 
     def generate():
         chunks: queue.Queue[bytes | None] = queue.Queue(maxsize=8)
