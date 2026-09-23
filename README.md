@@ -116,9 +116,9 @@ Publishing is a separate, optional workflow. It requires configured platform acc
 
 ### Editable Adobe handoff
 
-The Adobe edit package is a ZIP containing the source media, a Premiere Pro FCP7 XML timeline, an After Effects JSX script, an SRT subtitle file, and a manifest with clip settings. Save edits before exporting. Extract the whole ZIP so the timeline and script can find the media. In Premiere Pro, import the XML project. In After Effects, run the JSX with **File → Scripts → Run Script File**; it creates and saves an `.aep` project beside the script. Keep the extracted `media` folder with the Adobe project when moving it.
+The Adobe edit package is a ZIP containing the source media, a Premiere Pro FCP7 XML timeline, an After Effects JSX script, an SRT subtitle file, a manifest with clip settings, and a README with import steps. Save edits before exporting, then extract the whole ZIP. In Premiere Pro, import `Premiere.xml`; if media is offline, relink it to the extracted `media` folder. Reapply clip speed values from the manifest. Import `captions.srt` and place it at the start of the sequence; its cues use source-speed timing and may need retiming after speed changes. In After Effects, run `after-effects.jsx` with **File → Scripts → Run Script File**; it saves an `.aep` project beside the script. If saving is blocked, enable **Preferences → Scripting & Expressions → Allow Scripts to Write Files and Access Network**, then run the script again. Keep the extracted `media` folder beside the Adobe project when moving it. If selected clips have different aspect ratios, the first selected clip sets the Premiere sequence canvas.
 
-This is an editable starting point, not a pixel-identical transfer of Clipflow renders. The XML and script carry clip timing, vertical sequence dimensions, and supported caption text. Smart camera movement, tracking, and Clipflow-specific render effects are not translated; use the rendered MP4 as a visual reference and adjust the Adobe project as needed. Adobe applications were not installed in the validation environment, so import and script execution have not been verified here.
+This is an editable starting point, not a pixel-identical transfer of Clipflow renders. Premiere carries source trims and basic audio/video placement; the script creates editable source and caption text layers. Crop/reframe, adaptive camera movement and tracking, denoise, caption appearance, other rendered effects, and playback speed are not reproduced automatically. Reapply speed from the manifest and use a rendered MP4 as a visual reference. Adobe applications were not installed in the validation environment, so import and script execution have not been verified here.
 
 ## Features
 
@@ -301,9 +301,9 @@ npm test
 Pop-Location
 ```
 
-The current Python suite passes **250 tests**; frontend tests and the production build pass. The hosted editor and Azure worker include desktop-assisted YouTube import. A live test signed in, issued a one-use ticket, downloaded a public YouTube video on a local PC, uploaded it to Azure, reached a source-ready project, and removed that test project. An earlier hosted smoke check covered clip generation, preview, and export.
+The current Python suite passes **252 tests**; frontend tests and the production build have also passed in the release checks. The hosted editor and Azure worker include desktop-assisted YouTube import. A live test signed in, issued a one-use ticket, downloaded a public YouTube video on a local PC, uploaded it to Azure, reached a source-ready project, and removed that test project. An earlier hosted smoke check covered clip generation, preview, and export. Adobe package tests check archive contents, timeline structure, subtitle/script content, and API download behavior; they do not launch Premiere Pro or After Effects.
 
-[Windows release workflow 35907285265](https://github.com/aminemons/clipflow/actions/runs/35907285265) passed on revision `267e9d3`: it extracted the package, checked protocol registration, loaded the offline speech runtime, generated a Smart clip, and exported H.264 video. The [release ZIP](https://github.com/aminemons/clipflow/releases/tag/desktop-267e9d3a6e173881bc2a34a1a22602a4992b2541) is 852,976,162 bytes with SHA-256 `4eb6c0ef0aa369b3ccf031debbcab4ddf9a817a669795708014f59012b699817`. These checks do not establish that every external provider or social account works live. See [docs/VALIDATION.md](docs/VALIDATION.md) for evidence and limits.
+[Windows release workflow 35917728287](https://github.com/aminemons/clipflow/actions/runs/35917728287) passed on revision `34757cc`: it extracted the package, checked protocol registration, loaded the offline speech runtime, generated a Smart clip, and exported H.264 video. The [release ZIP](https://github.com/aminemons/clipflow/releases/tag/desktop-34757cc7baff06ef1934ee37e8f1709835b1b4a5) is 852,998,084 bytes with SHA-256 `511fa94260f5dd42a0ee562126e36ab5f4cb96c0e8449c83c9a57fc5608a811a`. These checks do not establish that every external provider or social account works live. See [docs/VALIDATION.md](docs/VALIDATION.md) for evidence and limits.
 
 To build the Windows package from a prepared build environment:
 
@@ -329,7 +329,7 @@ The application grew through five stages:
 4. **Desktop and hosting:** package the local runtime and deploy the shared frontend/backend architecture behind owner authentication.
 5. **Reliability and handoff:** improve import failures, package verification, onboarding, regression coverage, and setup documentation.
 
-The hosted application and worker contain the desktop handoff from revision `267e9d3`. The matching Windows package is available through **Download desktop** and the [GitHub release](https://github.com/aminemons/clipflow/releases/tag/desktop-267e9d3a6e173881bc2a34a1a22602a4992b2541). See [docs/VALIDATION.md](docs/VALIDATION.md).
+The hosted application and worker use revision `34757cc`. The matching Windows package is available through **Download desktop** and the [GitHub release](https://github.com/aminemons/clipflow/releases/tag/desktop-34757cc7baff06ef1934ee37e8f1709835b1b4a5). See [docs/VALIDATION.md](docs/VALIDATION.md).
 
 ## Current limits and next steps
 
