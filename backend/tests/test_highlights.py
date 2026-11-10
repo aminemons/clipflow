@@ -233,6 +233,11 @@ def test_model_candidate_context_is_compact_and_spread_out():
     assert all(highlights._overlap(left, right) <= 0.1
                for i, left in enumerate(context) for right in context[i + 1:])
     assert any(candidate["start"] > 180 for candidate in context)
+    smaller = highlights._model_candidate_context(
+        candidates, "", highlights._model_candidate_limit(1)
+    )
+    assert len(smaller) == 12
+    assert any(candidate["start"] > 180 for candidate in smaller)
 
 
 def test_model_ranking_receives_the_passage_payoff(monkeypatch):

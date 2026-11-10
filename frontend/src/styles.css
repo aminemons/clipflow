@@ -217,7 +217,7 @@ a svg {
 }
 .inspector-tabs {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   border-bottom: 1px solid var(--line);
   padding: 10px 8px 0;
   gap: 2px;
@@ -230,7 +230,7 @@ a svg {
   gap: 7px;
   background: none;
   color: var(--muted);
-  font-size: 13px;
+  font-size: 12px;
   border-bottom: 2px solid transparent;
   padding: 10px 3px 12px;
 }

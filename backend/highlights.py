@@ -629,7 +629,7 @@ def _select_in_rank_order(
 
 
 def _model_candidate_context(
-    candidates: list[dict[str, Any]], topic: str
+    candidates: list[dict[str, Any]], topic: str, limit: int = 30
 ) -> list[dict[str, Any]]:
     """Balance strong local candidates with coverage of the whole recording."""
     ranked = _rank_candidates(candidates, topic)
@@ -641,15 +641,16 @@ def _model_candidate_context(
         selected.append(candidate)
         return True
 
-    # Reserve ten places for later parts of long sources; the heuristic can
+    # Reserve a third of the shortlist for coverage across the source; the heuristic can
     # otherwise fill a model request with passages from one dense conversation.
+    coverage = limit // 3
     for candidate in ranked:
         add(candidate)
-        if len(selected) >= 20:
+        if len(selected) >= limit - coverage:
             break
     source_end = max((float(candidate["end"]) for candidate in ranked), default=0.0)
-    for index in range(10):
-        midpoint = (index + 0.5) / 10 * source_end
+    for index in range(coverage):
+        midpoint = (index + 0.5) / coverage * source_end
         for candidate in sorted(
             ranked,
             key=lambda item: abs((item["start"] + item["end"]) / 2 - midpoint),
@@ -657,13 +658,18 @@ def _model_candidate_context(
             if add(candidate):
                 break
     for candidate in ranked:
-        if len(selected) >= 30:
+        if len(selected) >= limit:
             break
         add(candidate)
     # Keeping most of each passage lets a text model judge the setup and payoff
     # together. Thirty excerpts of at most 1,200 Unicode characters plus
     # metadata remain comfortably below the adapter's 100 KB request cap.
     return selected
+
+
+def _model_candidate_limit(max_clips: int) -> int:
+    # Smaller requests need fewer alternatives. Keep a broad pool for batches.
+    return min(30, max(12, max_clips * 3))
 
 
 def _public(candidate: dict[str, Any]) -> dict[str, Any]:
@@ -703,7 +709,7 @@ def _hosted_rank(
     model = config.value("GROQ_HIGHLIGHT_MODEL", "llama-3.3-70b-versatile")
     # Send only bounded candidate text. The model chooses IDs; local
     # timestamps remain authoritative and are checked again below.
-    ranked = _model_candidate_context(candidates, topic)
+    ranked = _model_candidate_context(candidates, topic, _model_candidate_limit(max_clips))
     payload_candidates = [
         {
             "id": candidate["id"],
@@ -793,7 +799,7 @@ def _hosted_rank(
 def _model_rank(candidates, topic, max_clips, provider, progress):
     from .language_models import generate_json
 
-    ranked = _model_candidate_context(candidates, topic)
+    ranked = _model_candidate_context(candidates, topic, _model_candidate_limit(max_clips))
     _cancel(progress, "Ranking transcript passages", 70)
     data = generate_json(
         provider,

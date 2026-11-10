@@ -47,6 +47,27 @@ def test_remove_all_restore_keeps_ids_edits_and_export_status(editor):
     assert len(store.get("test")["clips"]) == 2
 
 
+def test_motion_graphic_persists_and_renders_without_captions(editor, tmp_path):
+    from backend.media import _caption_ass
+
+    client, store, clips = editor
+    clip = clips[1]
+    url = f"/api/projects/test/clips/{clip['id']}"
+    graphic = {"preset": "speaker", "text": "Maya Chen / Editor"}
+    saved = client.patch(url, json={"motion_graphic": graphic, "caption_enabled": False})
+    assert saved.status_code == 200
+    assert saved.json()["status"] == "draft"
+    assert saved.json()["revision"] == clip.get("revision", 1) + 1
+    assert client.patch(url, json={"motion_graphic": {"preset": "unknown", "text": "Maya"}}).status_code == 400
+    current = store.get("test")["clips"][1]
+    assert current["motion_graphic"] == graphic
+    ass = _caption_ass(tmp_path / "motion.mp4", current).read_text(encoding="utf-8")
+    assert "Dialogue: 1," in ass and r"\move(" in ass and "Maya Chen / Editor" in ass
+    cleared = client.patch(url, json={"motion_graphic": None})
+    assert cleared.status_code == 200
+    assert _caption_ass(tmp_path / "cleared.mp4", cleared.json()) is None
+
+
 def test_bulk_remove_is_atomic_and_busy_safe(editor, monkeypatch):
     client, store, clips = editor
     assert (

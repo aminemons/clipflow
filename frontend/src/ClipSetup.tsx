@@ -361,9 +361,9 @@ export default function ClipSetup({
       setError("Enter a start and end time for this moment.");
       return;
     }
-    if (start < 0 || end > project.duration || end <= start) {
+    if (start < 0 || end > project.duration || end - start < 2) {
       setError(
-        `Each range must be inside the source and longer than zero seconds (0–${formatDuration(project.duration)}).`,
+        `Each range must be inside the source and at least 2 seconds long (0–${formatDuration(project.duration)}).`,
       );
       return;
     }
@@ -471,11 +471,11 @@ export default function ClipSetup({
           !finite(range.end) ||
           range.start < 0 ||
           range.end > project.duration ||
-          range.end <= range.start,
+          range.end - range.start < 2,
       )
     ) {
       setError(
-        "Each selected moment must be inside the source and longer than zero seconds.",
+        "Each selected moment must be inside the source and at least 2 seconds long.",
       );
       return false;
     }

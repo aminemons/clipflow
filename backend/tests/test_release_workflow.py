@@ -78,7 +78,7 @@ def make_short_source(path: Path) -> None:
             "-i",
             "sine=frequency=440:sample_rate=16000",
             "-t",
-            "3",
+            "5",
             "-c:v",
             "libx264",
             "-pix_fmt",
@@ -108,13 +108,13 @@ def test_local_release_workflow_upload_edit_proof_export_restore_persistence(tmp
     assert uploaded.status_code == 200, uploaded.text
     project_id = wait_job(uploaded.json()["id"])["project_id"]
     project = client.get(f"/api/projects/{project_id}").json()
-    assert 2.8 <= project["duration"] <= 3.2
+    assert 4.8 <= project["duration"] <= 5.2
 
     generated = client.post(
         f"/api/projects/{project_id}/generate",
         json={
             "mode": "manual",
-            "ranges": [{"start": 0, "end": 1}, {"start": 1, "end": 2}],
+            "ranges": [{"start": 0, "end": 2}, {"start": 2, "end": 4}],
             "camera": {"framing": "fit", "resolution": 360},
             "captions": {"mode": "manual", "text": "release test", "style": "bold"},
             "audio": {"volume": 1},

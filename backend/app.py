@@ -1768,6 +1768,7 @@ CLIP_FIELDS = {
     "caption_x",
     "caption_y",
     "caption_enabled",
+    "motion_graphic",
     "playback_speed",
     "audio_volume",
     "audio_denoise",
@@ -1801,6 +1802,7 @@ MEDIA_CLIP_FIELDS = {
     "caption_x",
     "caption_y",
     "caption_enabled",
+    "motion_graphic",
     "playback_speed",
     "audio_volume",
     "audio_denoise",
@@ -1811,7 +1813,11 @@ MEDIA_CLIP_FIELDS = {
 
 
 def validate_clip(clip: dict, duration: float):
+    from .motion_graphics import valid_motion_graphic
+
     try:
+        if not valid_motion_graphic(clip.get("motion_graphic")):
+            raise ValueError
         clip["start"], clip["end"] = float(clip["start"]), float(clip["end"])
         if (
             not math.isfinite(clip["start"])

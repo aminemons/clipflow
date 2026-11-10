@@ -1,4 +1,5 @@
 import type { TranscriptSegment } from "./TranscriptPanel";
+import type { MotionGraphic } from "./editRecipes";
 
 export type Clip = {
   id: string;
@@ -28,6 +29,7 @@ export type Clip = {
   caption_x?: number;
   caption_y?: number;
   caption_enabled?: boolean;
+  motion_graphic?: MotionGraphic | null;
   playback_speed?: number;
   audio_volume?: number;
   audio_denoise?: boolean;

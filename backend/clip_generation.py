@@ -16,8 +16,8 @@ class TimeRange(SetupModel):
 
     @model_validator(mode="after")
     def ordered(self):
-        if self.end <= self.start:
-            raise ValueError("Each range must end after it starts.")
+        if self.end - self.start  < 2:
+            raise ValueError("Each range must be at least 2 seconds long.")
         return self
 
 

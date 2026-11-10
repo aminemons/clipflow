@@ -12,6 +12,7 @@ import zipfile
 from pathlib import Path
 from typing import Callable
 from .caption_layout import caption_cues, font_name, fonts_directory, word_caption_cues
+from .motion_graphics import graphic_dialogue
 
 from .camera import (
     CameraController,
@@ -760,10 +761,11 @@ def _filter_path(path: str | Path) -> str:
 
 
 def _caption_ass(out: str | Path, clip: dict, srt: str | None = None) -> Path | None:
-    if not clip.get("caption_enabled", True):
-        return None
-    text = str(clip.get("caption_text", "")).strip()
-    if not text and not srt:
+    captions_enabled = clip.get("caption_enabled", True)
+    text = str(clip.get("caption_text", "")).strip() if captions_enabled else ""
+    srt = srt if captions_enabled else None
+    graphic = clip.get("motion_graphic")
+    if not text and not srt and not graphic:
         return None
     path = Path(out).with_suffix(".caption.ass")
     # ASS uses BBGGRR colors; preserve the UI hex color exactly in the rendered caption.
@@ -828,7 +830,8 @@ def _caption_ass(out: str | Path, clip: dict, srt: str | None = None) -> Path | 
         events = [(timestamp(a), timestamp(b), ass_text(t))
                   for start, end, line in blocks
                   for a, b, t in caption_cues(seconds(start), seconds(end), line)]
-    if not events:
+    graphic_event = graphic_dialogue(graphic, canvas_height)
+    if not events and not graphic_event:
         return None
     # Normalized editor coordinates map to the selected aspect canvas while
     # keeping the established 720px caption width and font scale.
@@ -845,7 +848,8 @@ def _caption_ass(out: str | Path, clip: dict, srt: str | None = None) -> Path | 
         "[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n"
         + "".join(
             f"Dialogue: 0,{a},{b},Clip,,0,0,0,,{position}{t}\n" for a, b, t in events
-        ),
+        )
+        + graphic_event,
         encoding="utf-8",
     )
     return path

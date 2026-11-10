@@ -44,6 +44,7 @@ import ExportsPage from "./ExportsPage";
 import SettingsPage from "./SettingsPage";
 import GuidedTour, { type TourPage } from "./GuidedTour";
 import CaptionPresets from "./CaptionPresets";
+import { insertPrompts, motionGraphics, type MotionGraphic } from "./editRecipes";
 import ClipLibrary from "./ClipLibrary";
 import { libraryPatch, type LibraryPatch } from "./clipLibraryModel";
 import { parseSubtitles } from "./subtitleImport";
@@ -59,6 +60,13 @@ import type {
 } from "./editorTypes";
 
 const API = "/api";
+const finishSteps = [
+  ["clipping", "Shape the story", "Start with the hook. Trim dead time and listen for a complete ending."],
+  ["layout", "Frame the shot", "Choose an output shape and keep the speaker or subject visible."],
+  ["captions", "Check captions", "Correct names and timing. Keep text clear of faces and platform controls."],
+  ["audio", "Clean up sound", "Listen for steady dialogue, distracting noise and abrupt cuts."],
+  ["graphics", "Add motion", "Use a title, speaker ID or takeaway only where it helps the viewer."],
+] as const;
 const DEFAULT_CLIP: Omit<Clip, "id"> = {
   title: "Untitled clip",
   start: 0,
@@ -109,7 +117,7 @@ export default function App() {
   >();
   const [tourReplay, setTourReplay] = useState(0);
   const [inspector, setInspector] = useState<
-    "clipping" | "layout" | "captions" | "audio"
+    "clipping" | "layout" | "captions" | "audio" | "graphics"
   >("clipping");
   const [subtitleDraft, setSubtitleDraft] = useState<
     { start: number; end: number; text: string }[] | null
@@ -146,9 +154,7 @@ export default function App() {
   });
   const [jobs, setJobs] = useState<Job[]>([]);
   const [proofUrl, setProofUrl] = useState("");
-  const [generationPrompt, setGenerationPrompt] = useState(
-    "A quiet travel detail, soft movement, natural light",
-  );
+  const [generationPrompt, setGenerationPrompt] = useState("");
   const [generationDuration, setGenerationDuration] = useState<5 | 10>(5);
   const [showSetup, setShowSetup] = useState(false);
   const [analysisSubmitting, setAnalysisSubmitting] = useState(false);
@@ -242,10 +248,6 @@ export default function App() {
   const selected = clips.find((c) => c.id === selectedId) ?? clips[0];
   const duration = project?.duration || 0;
   const isBusy = job?.status === "queued" || job?.status === "running";
-  const brollAvailable = health.configuration?.higgsfield?.configured === true;
-  useEffect(() => {
-    if (!brollAvailable && sidebar === "connections") setSidebar("clips");
-  }, [brollAvailable, sidebar]);
 
   const refreshProjects = useCallback(async () => {
     try {
@@ -377,7 +379,7 @@ export default function App() {
           setClips(nextClips);
           if (next.kind === "generate_clips_job") {
             setShowSetup(false);
-            setInspector("layout");
+            setInspector("clipping");
             setWorkspaceMode("edit");
             setSidebar("clips");
             const first = nextClips.find(
@@ -1077,10 +1079,10 @@ export default function App() {
       setError(e instanceof Error ? e.message : "Transcription failed.");
     }
   }
-  async function renderProof() {
+  async function renderProof(saveDrafts = false) {
     if (!project || !selected || isBusy) return;
     try {
-      if (!(await flushQueuedSaves())) return;
+      if (!(await flushQueuedSaves(saveDrafts))) return;
       loadProjectOnDone.current = false;
       const proof = await api<Job>(`/projects/${project.id}/preview`, {
         method: "POST",
@@ -1088,7 +1090,7 @@ export default function App() {
       });
       proofJobId.current = proof.id;
       await startJob(proof);
-      setNotice("Rendering an exact framing proof");
+      setNotice("Rendering the saved clip for review");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Preview render failed.");
     }
@@ -1317,6 +1319,9 @@ export default function App() {
     }
   }
 
+  const finishIndex = finishSteps.findIndex(([tab]) => tab === inspector);
+  const finishStep = finishSteps[finishIndex];
+  const nextFinishStep = finishSteps[finishIndex + 1];
   return (
     <div
       className={`application-shell ${navCompact ? "navigation-collapsed" : ""}`}
@@ -1530,17 +1535,31 @@ export default function App() {
               aria-current={showSetup ? "step" : undefined}
               onClick={() => setShowSetup(true)}
             >
-              Clip setup
+              1. Pick moments
             </button>
             <button
               disabled={!clips.length}
-              aria-current={!showSetup ? "step" : undefined}
-              onClick={() => setShowSetup(false)}
+              aria-current={!showSetup && workspaceMode === "edit" ? "step" : undefined}
+              onClick={() => {
+                setShowSetup(false);
+                setWorkspaceMode("edit");
+                setInspector("clipping");
+                setSidebar("clips");
+              }}
             >
-              Edit clips ({clips.length})
+              2. Edit clips ({clips.length})
             </button>
-            <button onClick={() => navigatePage("exports")}>Exports</button>
-            <button onClick={() => navigatePage("publish")}>Publish</button>
+            <button
+              disabled={!selected}
+              aria-current={!showSetup && workspaceMode === "review" ? "step" : undefined}
+              onClick={() => {
+                setShowSetup(false);
+                setWorkspaceMode("review");
+              }}
+            >
+              3. Review
+            </button>
+            <button onClick={() => navigatePage("exports")}>4. Deliver</button>
           </nav>
           {showSetup && project ? (
             <ClipSetup
@@ -1559,11 +1578,39 @@ export default function App() {
             />
           ) : (
             <>
+              {selected && (
+                <section className="cut-guide" aria-label="Editing guide">
+                  <div>
+                    <strong>{workspaceMode === "review" ? "Watch the final cut" : finishStep[1]}</strong>
+                    <p>{workspaceMode === "review"
+                      ? "Play the rendered clip with sound. Check the opening, captions and final frame."
+                      : finishStep[2]}</p>
+                  </div>
+                  {workspaceMode === "review" ? (
+                    proofUrl ? (
+                      <button className="primary-action" disabled={isBusy} onClick={() => void exportClips([selected.id])}>
+                        Export this clip
+                      </button>
+                    ) : (
+                      <button className="primary-action" disabled={isBusy} onClick={() => void renderProof(true)}>
+                        Save and render preview
+                      </button>
+                    )
+                  ) : (
+                    <button className="secondary-action" onClick={() => {
+                      if (nextFinishStep) setInspector(nextFinishStep[0]);
+                      else setWorkspaceMode("review");
+                    }}>
+                      {nextFinishStep ? `Next: ${nextFinishStep[1]}` : "Review the cut"}
+                    </button>
+                  )}
+                </section>
+              )}
               <div className="workspace">
                 <aside className="left-panel" aria-label="Editing tools">
                   <div className="inspector-tabs">
-                    {(["clipping", "layout", "captions", "audio"] as const).map(
-                      (tab) => (
+                    {finishSteps.map(
+                      ([tab]) => (
                         <button
                           key={tab}
                           aria-pressed={inspector === tab}
@@ -1571,7 +1618,10 @@ export default function App() {
                           data-tour={
                             tab === "captions" ? "editor-captions" : undefined
                           }
-                          onClick={() => setInspector(tab)}
+                          onClick={() => {
+                            setWorkspaceMode("edit");
+                            setInspector(tab);
+                          }}
                         >
                           {tab === "clipping" ? (
                             <Scissors size={18} />
@@ -1579,8 +1629,10 @@ export default function App() {
                             <Focus size={18} />
                           ) : tab === "captions" ? (
                             <MessageSquareText size={18} />
-                          ) : (
+                          ) : tab === "audio" ? (
                             <Activity size={18} />
+                          ) : (
+                            <Sparkles size={18} />
                           )}
                           <span>
                             {tab === "clipping"
@@ -1589,7 +1641,7 @@ export default function App() {
                                 ? "Layout"
                                 : tab === "captions"
                                   ? "Captions"
-                                  : "Audio"}
+                                  : tab === "audio" ? "Audio" : "Motion"}
                           </span>
                         </button>
                       ),
@@ -2062,6 +2114,14 @@ export default function App() {
                             />
                           )}
                         </div>
+                        <div hidden={inspector !== "graphics"}>
+                          <MotionGraphicPanel
+                            key={JSON.stringify([selected.id, selected.motion_graphic])}
+                            graphic={selected.motion_graphic}
+                            onApply={(graphic) => patchClip(selected.id, { motion_graphic: graphic })}
+                            onOpenPrompts={() => setSidebar("connections")}
+                          />
+                        </div>
                       </>
                     )}
                   </div>
@@ -2154,7 +2214,7 @@ export default function App() {
                               ? "Preview is up to date"
                               : "Render the saved clip"
                         }
-                        onClick={renderProof}
+                        onClick={() => void renderProof()}
                       >
                         Render preview
                       </button>
@@ -2215,7 +2275,7 @@ export default function App() {
                       onPlayState={setPlaying}
                       onTimeChange={setActiveTime}
                       onPatch={patchClip}
-                      onRenderProof={renderProof}
+                      onRenderProof={() => void renderProof()}
                       renderDisabled={isBusy || saveState !== "saved"}
                       onUseSource={() => {
                         proofJobId.current = "";
@@ -2309,7 +2369,7 @@ export default function App() {
                       [
                         "clips",
                         "transcript",
-                        ...(brollAvailable ? (["connections"] as const) : []),
+                        "connections",
                       ] as const
                     ).map((tab) => (
                         <button
@@ -2627,6 +2687,56 @@ function NumberSetting({
   );
 }
 
+function MotionGraphicPanel({
+  graphic,
+  onApply,
+  onOpenPrompts,
+}: {
+  graphic?: MotionGraphic | null;
+  onApply: (graphic: MotionGraphic | null) => void;
+  onOpenPrompts: () => void;
+}) {
+  const [preset, setPreset] = useState<MotionGraphic["preset"]>(graphic?.preset ?? "opening");
+  const [text, setText] = useState(graphic?.text ?? "");
+  const recipe = motionGraphics.find((item) => item.id === preset)!;
+  const valid = text.trim() && !/\p{C}/u.test(text);
+
+  return (
+    <section className="settings-section motion-panel">
+      <h3>Motion graphics</h3>
+      <p>Choose a style and write the text. The graphic animates in at the start of the clip.</p>
+      <form onSubmit={(event) => {
+        event.preventDefault();
+        if (valid) onApply({ preset, text: text.trim() });
+      }}>
+        <label>
+          Graphic style
+          <select value={preset} onChange={(event) => {
+            const item = motionGraphics.find(({ id }) => id === event.target.value);
+            if (item) setPreset(item.id);
+          }}>
+            {motionGraphics.map(({ id, name }) => <option value={id} key={id}>{name}</option>)}
+          </select>
+        </label>
+        <div className={`motion-sample motion-sample-${preset}`} aria-hidden="true">
+          <span>{text.trim() || recipe.example}</span>
+        </div>
+        <small>{recipe.purpose}</small>
+        <label>
+          On-screen text
+          <input value={text} maxLength={72} onChange={(event) => setText(event.target.value)} placeholder={recipe.example} />
+        </label>
+        <div className="motion-actions">
+          <button className="primary-action" type="submit" disabled={!valid}>Apply graphic</button>
+          {graphic && <button className="secondary-action" type="button" onClick={() => onApply(null)}>Remove</button>}
+        </div>
+      </form>
+      <p>Review the rendered preview to see the animation on your footage.</p>
+      <button className="secondary-action" type="button" onClick={onOpenPrompts}>Open B-roll prompts</button>
+    </section>
+  );
+}
+
 function ConnectionsPane({
   health,
   busy,
@@ -2645,21 +2755,33 @@ function ConnectionsPane({
   onGenerate: (prompt: string, duration: 5 | 10) => void;
 }) {
   const hf = health.configuration?.higgsfield;
-  const canGenerate = !!hf?.configured && !busy && prompt.trim().length >= 3;
+  const missingDetails = /\[[a-z]+\]/i.test(prompt);
+  const canGenerate = !!hf?.configured && !busy && prompt.trim().length >= 3 && !missingDetails;
   return (
     <div className="connections-pane">
-      <div className="pane-title">Generate a B-roll shot</div>
+      <div className="pane-title">B-roll prompt library</div>
       <p className="pane-lede">
-        Create a short insert with Higgsfield. The finished generation opens as
-        a new project. Provider credits and account usage are yours.
+        Pick a starting point or write your own. Higgsfield generates a separate
+        project and uses provider credits.
       </p>
-      <label className="field-label">Prompt</label>
+      <div className="insert-recipes" aria-label="B-roll prompt templates">
+        {insertPrompts.map(({ name, prompt: template }) => (
+          <button className="secondary-action" type="button" key={name} onClick={() => setPrompt(template)}>
+            {name}
+          </button>
+        ))}
+      </div>
+      <label className="field-label" htmlFor="broll-prompt">Editable prompt</label>
       <textarea
+        id="broll-prompt"
         className="generation-prompt"
         value={prompt}
         onChange={(e) => setPrompt(e.target.value)}
         rows={4}
+        maxLength={2000}
+        placeholder="Describe one subject, one action and one camera move."
       />
+      {missingDetails && <p className="pane-lede">Replace the words in brackets with details from your shot.</p>}
       <div className="generation-row">
         <div>
           <span className="field-label">Duration</span>

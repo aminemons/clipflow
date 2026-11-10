@@ -387,7 +387,7 @@ def _manifest(project: dict, clips: list[dict], media_name: str) -> dict:
         "Premiere XML carries source trims and basic audio/video placement; Clipflow crop, adaptive camera, denoise, caption styling, visual effects, and playback speed are not reproduced.",
         "Premiere uses the first selected clip's canvas when selected clips have different aspect ratios; clips with other ratios will be scaled into that sequence.",
         "SRT cues use source-speed timing. Retiming captions may be needed after reapplying playback speed in Premiere.",
-        "After Effects script creates editable source layers and caption text layers. Adaptive camera tracking and rendered Clipflow effects are not reconstructed.",
+        "After Effects script creates editable source layers and caption text layers. Adaptive camera tracking, motion graphics, and rendered Clipflow effects are not reconstructed.",
         "Reapply playback speed in Premiere using the values in this manifest.",
         "Premiere XML media paths are package-relative hints. If Premiere reports offline media, relink to the media folder extracted from this ZIP.",
         "The After Effects script creates a new project; if an existing project has unsaved changes, After Effects may prompt before opening the new project. Save the resulting AEP alongside the extracted media folder.",
@@ -415,7 +415,7 @@ def _package_readme(project: dict, media_name: str, has_audio: bool) -> str:
         "AE may ask whether to save it before creating the new project. Keep the extracted media folder beside the AEP when moving it.\n"
         "4. Import captions.srt into Premiere and place it at the start of the sequence for editable caption cues.\n\n"
         "This is a conservative edit handoff. Clipflow crop/reframe, adaptive camera movement, denoise, caption appearance, "
-        "and other rendered effects are not recreated. The manifest retains the source clip settings for reference. "
+        "and other rendered effects, including motion graphics, are not recreated. The manifest retains supported clip settings for reference. "
         "The ZIP includes the original source once; rendered outputs are not included and are not a visual match to the Clipflow render.\n"
     )
 
