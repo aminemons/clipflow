@@ -9,6 +9,7 @@ import os
 import re
 import shutil
 import stat
+import sys
 import threading
 import tempfile
 import time
@@ -44,6 +45,7 @@ from .source_probe import (
     validate_youtube_url,
 )
 from .clip_generation import GenerateInput, generate_clips
+from .auto_edit import AutoEditInput, auto_edit
 from .embedded_subtitles import TEXT_CODECS
 from .export_artifacts import (
     finalize_exports,
@@ -440,7 +442,7 @@ def _run_job(item: dict, fn, *args):
         if cancel_events.get(item["id"], threading.Event()).is_set():
             raise JobCancelled("job cancelled")
         result = fn(item, *args)
-        if cancel_events.get(item["id"], threading.Event()).is_set():
+        if not item.pop("_committed", False) and cancel_events.get(item["id"], threading.Event()).is_set():
             raise JobCancelled("job cancelled")
         if isinstance(result, dict):
             item.update(result)
@@ -826,8 +828,11 @@ def upload_job(item: dict, project_id: str, target: float):
 
 def generate_clips_job(item: dict, project_id: str, payload: dict):
     # Pass the runtime services so the generator shares job locks and storage.
-    import sys
     return generate_clips(sys.modules[__name__], item, project_id, payload)
+
+
+def auto_edit_job(item: dict, project_id: str, payload: dict):
+    return auto_edit(sys.modules[__name__], item, project_id, payload)
 
 
 def _cleanup_youtube_downloads(project_id: str) -> None:
@@ -929,6 +934,17 @@ def demo_job(item: dict, project_id: str, target: float):
     return {}
 
 
+def _auto_proof_file(project_id: str, clip: dict) -> Path | None:
+    proof = clip.get("auto_proof") or {}
+    if proof.get("revision") != clip.get("revision", 1) or not proof.get("job_id"):
+        return None
+    try:
+        job_id = safe_identifier(proof["job_id"])
+        return workspace_file(store.files / project_id / f"preview-{clip['id']}-{job_id}.mp4")
+    except HTTPException:
+        return None
+
+
 def export_job(item: dict, project_id: str, clip_ids: list[str], expected_revisions: dict | None = None):
     project = store.get(project_id)
     source = source_path(project_id)
@@ -956,20 +972,26 @@ def export_job(item: dict, project_id: str, clip_ids: list[str], expected_revisi
             outfile = out_dir / f"{clip['id']}.mp4"
             temporary = out_dir / f".{clip['id']}.{item['id']}.mp4"
             temp_outputs.append(temporary)
-            subtitle = srt_for_clip(
-                clip, clip.get("transcript", project.get("transcript", [])), for_render=True
-            )
-            render_clip(
-                source,
-                clip,
-                temporary,
-                subtitle or None,
-                lambda stage, percent, index=i: update(
-                    item,
-                    f"Clip {index + 1}/{len(selected)}: {stage}",
-                    5 + int((index + percent / 100) / len(selected) * 90),
-                ),
-            )
+            proof = _auto_proof_file(project_id, clip)
+            if proof:
+                update(item, "Packaging the reviewed cut", 10 + int(80 * i / len(selected)))
+                shutil.copyfile(proof, temporary)
+            else:
+                subtitle = srt_for_clip(
+                    clip, clip.get("transcript", project.get("transcript", [])), for_render=True
+                )
+                render_clip(
+                    source,
+                    clip,
+                    temporary,
+                    subtitle or None,
+                    lambda stage, percent, index=i: update(
+                        item,
+                        f"Clip {index + 1}/{len(selected)}: {stage}",
+                        5 + int((index + percent / 100) / len(selected) * 90),
+                    ),
+                )
+            check_cancelled(item)
             os.replace(temporary, outfile)
             temp_outputs.remove(temporary)
             clip["status"] = "exported"
@@ -1574,6 +1596,7 @@ def retry_job(job_id: str):
         raise HTTPException(409, "wait for cancellation to finish before retrying")
     handlers = {
         "generate_clips_job": generate_clips_job,
+        "auto_edit_job": auto_edit_job,
         "analyze_job": analyze_job,
         "upload_job": upload_job,
         "youtube_job": youtube_job,
@@ -2095,6 +2118,14 @@ def generate_project_clips(project_id: str, body: GenerateInput):
     # Do not enqueue work that is known to be impossible; preserve the setup form.
     source_path(project_id)
     return submit(project_id, generate_clips_job, project_id, body.model_dump())
+
+
+@app.post("/api/projects/{project_id}/auto-edit")
+def start_auto_edit(project_id: str, body: AutoEditInput):
+    if not store.get(project_id):
+        raise HTTPException(404, "Project not found.")
+    source_path(project_id)
+    return submit(project_id, auto_edit_job, project_id, body.model_dump())
 
 
 @app.get("/api/projects/{project_id}/readiness")

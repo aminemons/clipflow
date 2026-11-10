@@ -4,6 +4,7 @@ import type { MotionGraphic } from "./editRecipes";
 export type Clip = {
   id: string;
   generation_id?: string;
+  auto_proof?: { job_id: string; revision: number };
   title: string;
   start: number;
   end: number;
@@ -48,6 +49,7 @@ export type Clip = {
 
 export type Project = {
   generation_settings?: import("./ClipSetup").ClipSetupSettings;
+  auto_edit?: import("./AutoEdit").EditBrief & { job_id: string; warning?: string };
   id: string;
   title: string;
   duration: number;

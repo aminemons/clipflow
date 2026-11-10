@@ -19,6 +19,7 @@ const names: Record<string, string> = {
   youtube_job: "YouTube import",
   upload_job: "Upload",
   analyze_job: "Clip selection",
+  auto_edit_job: "Auto edit",
   transcribe_job: "Transcription",
   demo_job: "Demo",
   higgsfield_job: "B-roll",

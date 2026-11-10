@@ -26,6 +26,28 @@ def test_effective_options_map_quality_and_algerian_context(monkeypatch):
     assert len(options["initial_prompt"]) <= 500
 
 
+def test_cached_only_model_requires_complete_assets_and_loads_local_path(monkeypatch, tmp_path):
+    calls = []
+    monkeypatch.setitem(sys.modules, "faster_whisper", SimpleNamespace(
+        WhisperModel=lambda path, **kwargs: calls.append((path, kwargs)) or object(),
+    ))
+    monkeypatch.setattr(transcription, "_MODEL_CACHE", transcription.OrderedDict())
+    monkeypatch.setattr(transcription, "_cache_root", lambda _: tmp_path)
+    monkeypatch.setattr(transcription, "_bundled_model_path", lambda _: None)
+    cached = tmp_path / "faster-whisper-small"
+    cached.mkdir()
+    (cached / "model.bin").touch()
+    options = {"model": "small", "language": "auto", "_local_files_only": True}
+    with pytest.raises(RuntimeError, match="No local Whisper model"):
+        transcription._load_local_model(tmp_path / "source.mp4", options, lambda *_: None)
+    assert not calls
+    for name in transcription.BUNDLED_MODEL_FILES:
+        (cached / name).touch()
+    transcription._load_local_model(tmp_path / "source.mp4", options, lambda *_: None)
+    assert calls[0][0] == str(cached.resolve())
+    assert calls[0][1]["local_files_only"] is True
+
+
 def test_local_model_is_reused_and_receives_quality_options(monkeypatch, tmp_path):
     calls = []
 

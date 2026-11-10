@@ -201,6 +201,58 @@ def test_local_release_workflow_upload_edit_proof_export_restore_persistence(tmp
     assert client.get(clip_mp4_url).content == immutable_bytes
 
 
+def test_auto_edit_previews_and_exports_same_cut(tmp_path, isolated_app, monkeypatch):
+    source = tmp_path / "auto-edit.mp4"
+    make_short_source(source)
+    project = api.create_project(source, "Auto edit")
+
+    response = client.post(
+        f"/api/projects/{project['id']}/auto-edit",
+        json={"style": "visual", "format": "4:5", "opening_text": "A first cut"},
+    )
+    assert response.status_code == 200, response.text
+    job = wait_job(response.json()["id"])
+    saved = client.get(f"/api/projects/{project['id']}").json()
+    assert saved["auto_edit"]["job_id"] == job["id"]
+    clip, = saved["clips"]
+    assert clip["motion_graphic"]["text"] == "A first cut"
+    assert clip["aspect_ratio"] == "4:5"
+    assert clip["selected"] is False
+    preview = client.get(f"/api/projects/{project['id']}/clips/{clip['id']}/previews/{job['id']}")
+    assert preview.status_code == 200 and b"ftyp" in preview.content[:64]
+
+    def unexpected_render(*_args):
+        pytest.fail("The approved draft should be packaged without rendering again")
+
+    monkeypatch.setattr(api, "render_clip", unexpected_render)
+    exported = client.post(f"/api/projects/{project['id']}/export", json={"clip_ids": [clip["id"]]})
+    assert exported.status_code == 200, exported.text
+    download = client.get(wait_job(exported.json()["id"])["download_url"])
+    assert download.status_code == 200 and download.content == preview.content
+
+
+def test_social_auto_edit_uses_transcript_for_captions_and_opening(tmp_path, isolated_app, monkeypatch):
+    source = tmp_path / "interview.mp4"
+    make_short_source(source)
+    project = api.create_project(source, "Interview")
+    project["transcript"] = [{
+        "start": .25,
+        "end": 4.25,
+        "text": "We finished the film on Friday. The team pulled it together.",
+    }]
+    api.store.save(project)
+    monkeypatch.setattr(api.speech, "transcribe", lambda *_: pytest.fail("Reuse the saved transcript"))
+
+    response = client.post(f"/api/projects/{project['id']}/auto-edit", json={"style": "social"})
+    assert response.status_code == 200, response.text
+    wait_job(response.json()["id"])
+    clip, = api.store.get(project["id"])["clips"]
+    assert clip["caption_style"] == "bold" and clip["caption_enabled"]
+    assert clip["transcript"] == project["transcript"]
+    assert clip["motion_graphic"]["preset"] == "callout"
+    assert project["transcript"][0]["text"].startswith(clip["motion_graphic"]["text"])
+
+
 def test_silent_source_smart_skips_moments_while_full_covers_every_second(tmp_path, isolated_app):
     source = tmp_path / "silent-source.mp4"
     subprocess.run(

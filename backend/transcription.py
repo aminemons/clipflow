@@ -206,6 +206,8 @@ def transcribe(
     source: Path, duration: float, progress: Progress, options: dict | None = None
 ) -> list[dict]:
     effective = effective_options(options)
+    if options and options.get("_local_files_only") is True:
+        effective["_local_files_only"] = True
     capability = public_capabilities()["transcription"]
     provider = (
         effective["provider"]
@@ -254,9 +256,7 @@ def _bundled_model_path(model: str) -> Path | None:
     return None
 
 
-def _model_is_cached(cache_root: Path, model: str) -> bool:
-    if _bundled_model_path(model) is not None:
-        return True
+def _cached_model_paths(cache_root: Path, model: str):
     names = (
         f"faster-whisper-{model}",
         f"models--Systran--faster-whisper-{model}",
@@ -265,11 +265,13 @@ def _model_is_cached(cache_root: Path, model: str) -> bool:
     for root in (cache_root, cache_root / "hub"):
         for name in names:
             candidate = root / name
-            if (candidate / "model.bin").exists():
-                return True
-            if any(candidate.glob("snapshots/*/model.bin")):
-                return True
-    return False
+            if (candidate / "model.bin").is_file():
+                yield candidate
+            yield from (binary.parent for binary in candidate.glob("snapshots/*/model.bin"))
+
+
+def _model_is_cached(cache_root: Path, model: str) -> bool:
+    return _bundled_model_path(model) is not None or next(_cached_model_paths(cache_root, model), None) is not None
 
 
 def _free_bytes(path: Path) -> int:
@@ -393,11 +395,19 @@ def _load_local_model(source: Path, options: dict, progress: Progress):
     device = value("CLIPFLOW_WHISPER_DEVICE", "cpu")
     compute = value("CLIPFLOW_WHISPER_COMPUTE", "int8")
     cache_root = _cache_root(source)
+    local_path = _bundled_model_path(model_name)
+    if options.get("_local_files_only") and local_path is None:
+        local_path = next(
+            (path for path in _cached_model_paths(cache_root, model_name)
+             if all((path / name).is_file() for name in BUNDLED_MODEL_FILES)),
+            None,
+        )
+        if local_path is None:
+            raise RuntimeError("No local Whisper model is cached")
     _preflight_model(cache_root, model_name)
     from faster_whisper import WhisperModel
 
-    bundled_model = _bundled_model_path(model_name)
-    model_source = str(bundled_model) if bundled_model else model_name
+    model_source = str(local_path.resolve()) if local_path else model_name
     key = (model_source, device, compute, str(cache_root.resolve()))
     with _MODEL_LOCK:
         cached = _MODEL_CACHE.get(key)
@@ -415,7 +425,7 @@ def _load_local_model(source: Path, options: dict, progress: Progress):
                 "download_root": str(cache_root),
                 "cpu_threads": options.get("cpu_threads", 2),
             }
-            if bundled_model is not None:
+            if local_path is not None:
                 model_kwargs["local_files_only"] = True
             model = WhisperModel(
                 model_source,

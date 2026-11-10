@@ -422,8 +422,7 @@ export function SourceImport({
         </p>
       )}
       <p className="source-import-footer">
-        Import the source, then configure moments, camera and captions before
-        generating clips.
+        After import, choose an editing style and let Clipflow make a cut for you.
       </p>
     </div>
   );
@@ -431,12 +430,13 @@ export function SourceImport({
 
 export function NewProjectDialog({
   onClose,
+  onDemo,
   error,
   uploading,
   hosted,
   onDesktopImport,
   ...props
-}: Props & { onClose: () => void; error: string }) {
+}: Props & { onClose: () => void; onDemo: () => void; error: string }) {
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     const element = dialog.current;
@@ -476,9 +476,9 @@ export function NewProjectDialog({
           {error}
         </p>
       )}
-      <p className="new-project-retained">
-        Your existing projects remain in Projects.
-      </p>
+      <button type="button" className="secondary-action" disabled={props.busy} onClick={onDemo}>
+        Try a 12-second sample
+      </button>
     </dialog>
   );
 }

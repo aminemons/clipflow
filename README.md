@@ -70,6 +70,10 @@ Desktop and hosted projects are separate. Connecting a provider in the desktop a
 
 ## Editing workflow
 
+New projects open in **Auto edit**. Choose a Story, Social, or Visual cut and a destination, then select **Make my edit**. Clipflow chooses the source range and finishing settings, renders a playable first cut, and exports the reviewed render on request. **Open editing tools** opens the workflow below for detailed control.
+
+Auto edit uses local analysis and reuses available timed subtitles or a complete local speech model. Without a model or timed subtitles, it can make a visual draft. Enable the one-time local model download in **Title, alternate cuts and captions** if you want speech-based selection and captions. The same options let you keep existing captions on screen without adding a second layer.
+
 ### 1. Import
 
 Upload an MP4, MOV, or WebM file, or inspect a public YouTube link and choose an available download quality.

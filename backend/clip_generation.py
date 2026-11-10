@@ -1,6 +1,7 @@
 """Validated project setup and atomic generation of independently editable clips."""
 from __future__ import annotations
 
+from contextlib import nullcontext
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -81,7 +82,7 @@ class GenerateInput(SetupModel):
         return self
 
 
-def generate_clips(api, item: dict, project_id: str, payload: dict) -> dict:
+def generate_clips(api, item: dict, project_id: str, payload: dict, *, finish=None, speech_policy=None) -> dict:
     """Compute privately; commit once so cancellation/failure never leaves half a batch.
 
     Existing clips retain their settings, corrected transcripts and exports. New
@@ -106,6 +107,8 @@ def generate_clips(api, item: dict, project_id: str, payload: dict) -> dict:
     transcript = project.get("transcript", [])
     speech_options = {"language": setup.captions.language, "quality": setup.captions.quality,
                       "dialect": setup.captions.dialect}
+    if speech_policy:
+        speech_options["provider"] = "local"
     cached = project.get("generation_speech", {})
     if not transcript and cached.get("options") == speech_options:
         transcript = cached.get("segments", [])
@@ -130,14 +133,20 @@ def generate_clips(api, item: dict, project_id: str, payload: dict) -> dict:
             setup.captions.mode = "none"
             item["warning"] = "No audio track: selected visual moments with captions off."
         elif not transcript:
+            readiness = None
             if setup.captions.quality == "auto":
                 readiness = api.speech.model_readiness(source, speech_options)
                 if readiness.get("warning"):
                     item["warning"] = readiness["warning"]
             try:
+                if speech_policy == "cached" and readiness and (
+                    readiness["selected_model"] not in readiness["cached_models"]
+                ):
+                    raise RuntimeError("No local Whisper model is cached")
                 transcript = api.speech.transcribe(source, duration,
                     lambda stage, percent: api.update(item, stage, int(percent * .5)),
-                    speech_options)
+                    {**speech_options, "_local_files_only": True}
+                    if speech_policy == "cached" else speech_options)
             except RuntimeError as error:
                 message = str(error)
                 recoverable = (
@@ -145,6 +154,7 @@ def generate_clips(api, item: dict, project_id: str, payload: dict) -> dict:
                     or message.startswith("Local Whisper ran out of memory")
                     or message.startswith("No local Whisper model is cached")
                     or (message.startswith("Whisper ") and "not cached" in message)
+                    or (speech_policy and message.startswith("Install backend/requirements.txt"))
                 )
                 if not (setup.automatic or visual_fallback) or not recoverable:
                     raise
@@ -155,8 +165,14 @@ def generate_clips(api, item: dict, project_id: str, payload: dict) -> dict:
                         "Close other apps and retry transcription separately.")
                 elif "not cached" in message:
                     speech_fallback_warning = (
+                        "No speech model is ready. This draft uses visual moments without captions. "
+                        "Enable the one-time speech download and make a new draft to use spoken words."
+                        if speech_policy == "cached" else
                         "No local speech model is available: selected visual moments. "
-                        "Install a model or configure Groq to rank spoken content.")
+                        "Install a model or configure Groq to rank spoken content."
+                    )
+                elif speech_policy and not message.startswith("No speech was detected"):
+                    speech_fallback_warning = "Speech recognition is unavailable. This draft uses visual moments without captions."
         if not transcript and not (setup.automatic or visual_fallback):
             raise RuntimeError("No speech was recognized. Check the language or choose manual captions.")
         if not transcript and (setup.automatic or visual_fallback):
@@ -169,9 +185,12 @@ def generate_clips(api, item: dict, project_id: str, payload: dict) -> dict:
                     "warning", "No speech was recognized: selected visual moments with captions off."
                 )
     progress = lambda stage, percent: api.update(item, stage, 50 + int(percent * .4))
+    if speech_policy and not transcript:
+        setup.audio.denoise = False
     if setup.mode == "smart":
         suggestions = suggest_highlights(source, transcript if setup.use_transcript else [],
-            setup.target_duration, setup.max_clips, setup.tolerance, setup.topic,
+            setup.target_duration, setup.max_clips, setup.tolerance,
+            setup.topic if not speech_policy or transcript else "",
             setup.provider, progress)
     elif setup.mode == "full":
         suggestions = [{"start": start, "end": end} for start, end in
@@ -203,18 +222,23 @@ def generate_clips(api, item: dict, project_id: str, payload: dict) -> dict:
         api.validate_clip(clip, duration)
         prepared.append(clip)
     api.check_cancelled(item)
-    with api.projects_lock:
-        latest = api.store.get(project_id)
-        if not latest or int(latest.get("edit_revision", 0)) != revision:
-            raise RuntimeError("The project changed during generation. Your edits were kept; generate again.")
-        api.check_cancelled(item)
-        # Deliberately append: setting up another batch must never erase edited clips.
-        latest["clips"].extend(prepared)
-        latest["generation_settings"] = setup.model_dump()
-        if needs_speech and transcript:
-            latest["generation_speech"] = {"options": speech_options, "segments": transcript}
-        latest["edit_revision"] = revision + 1
-        api.store.save(latest)
+    with (finish(source, prepared) if finish else nullcontext()) as auto_batch:
+        with api.projects_lock:
+            latest = api.store.get(project_id)
+            if not latest or int(latest.get("edit_revision", 0)) != revision:
+                raise RuntimeError("The project changed during generation. Your edits were kept; generate again.")
+            api.check_cancelled(item)
+            # Deliberately append: setting up another batch must never erase edited clips.
+            latest["clips"].extend(prepared)
+            if auto_batch:
+                latest["auto_edit"] = auto_batch
+            else:
+                latest["generation_settings"] = setup.model_dump()
+            if needs_speech and transcript:
+                latest["generation_speech"] = {"options": speech_options, "segments": transcript}
+            latest["edit_revision"] = revision + 1
+            api.store.save(latest)
+            item["_committed"] = True
     # The commit is the completion boundary; do not report cancellation after it.
     item.update(stage=f"Created {len(prepared)} editable clips", progress=99)
     return {"clip_titles": [c["title"] for c in prepared]}

@@ -38,6 +38,7 @@ import PublishPage from "./PublishPage";
 import PublishingSettings from "./PublishingSettings";
 import CameraControls from "./CameraControls";
 import ClipSetup, { type ClipSetupSettings } from "./ClipSetup";
+import AutoEdit, { type EditBrief } from "./AutoEdit";
 import WorkspaceNav from "./WorkspaceNav";
 import ProjectsPage, { type ProjectChanges } from "./ProjectsPage";
 import ExportsPage from "./ExportsPage";
@@ -157,6 +158,7 @@ export default function App() {
   const [generationPrompt, setGenerationPrompt] = useState("");
   const [generationDuration, setGenerationDuration] = useState<5 | 10>(5);
   const [showSetup, setShowSetup] = useState(false);
+  const [autoEditOpen, setAutoEditOpen] = useState(false);
   const [analysisSubmitting, setAnalysisSubmitting] = useState(false);
   const inspectorContent = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -279,6 +281,7 @@ export default function App() {
           "demo_job",
           "analyze_job",
           "generate_clips_job",
+          "auto_edit_job",
           "transcribe_job",
         ].includes(active.kind || "")
       )
@@ -364,7 +367,7 @@ export default function App() {
             importJobId.current = "";
             setInspector("clipping");
             setShowSetup(true);
-            setNotice("Source imported. Choose how you want to create clips.");
+            setAutoEditOpen(true);
             proofJobId.current = "";
             setProofUrl("");
             setPlaying(false);
@@ -377,6 +380,7 @@ export default function App() {
           }
           setProject(loaded);
           setClips(nextClips);
+          if (next.kind === "auto_edit_job") setAutoEditOpen(true);
           if (next.kind === "generate_clips_job") {
             setShowSetup(false);
             setInspector("clipping");
@@ -407,7 +411,7 @@ export default function App() {
             nextClips.some((clip) => clip.id === selectedId)
               ? selectedId
               : undefined) ??
-              (next.kind === "generate_clips_job"
+              (next.kind === "generate_clips_job" || next.kind === "auto_edit_job"
                 ? nextClips.find((clip) => clip.generation_id === next.id)?.id
                 : undefined) ??
               nextClips.find((clip) => clip.selected)?.id ??
@@ -416,11 +420,13 @@ export default function App() {
           );
           refreshProjects();
           setNotice(
-            next.kind === "generate_clips_job"
+            next.kind === "auto_edit_job"
+              ? "Your rendered cut is ready to watch."
+              : next.kind === "generate_clips_job"
               ? "Clips generated. Select a clip to adjust its timing, camera or captions."
               : next.kind === "transcribe_job"
                 ? "Transcription complete."
-                : "Source imported. Configure your clips to continue.",
+                : "Source imported. Choose a style to make your first cut.",
           );
           setHistory([]);
           setFuture([]);
@@ -574,13 +580,26 @@ export default function App() {
     setRestoreAvailable(false);
     try {
       if (!(await flushQueuedSaves())) return;
-      const loaded = await api<Project>(`/projects/${id}`);
+      let loaded = await api<Project>(`/projects/${id}`);
+      if (requestId !== openRequestId.current) return;
+      let active: Job | undefined;
+      if (loaded.active_job_id) {
+        try {
+          active = await api<Job>(`/jobs/${loaded.active_job_id}`);
+          if (active.kind === "auto_edit_job" && active.status === "done" && loaded.auto_edit?.job_id !== active.id) {
+            loaded = await api<Project>(`/projects/${id}`);
+          }
+        } catch {
+          /* The project is usable if its last job cannot be restored. */
+        }
+      }
       if (requestId !== openRequestId.current) return;
       if (project?.id !== loaded.id) {
         setSidebar("clips");
       }
       setProject(loaded);
       setShowSetup(!loaded.clips?.length);
+      setAutoEditOpen(Boolean(loaded.auto_edit) || !loaded.clips?.length);
       if (reveal) {
         setPage("editor");
         window.history.pushState(null, "", `#/editor/${loaded.id}`);
@@ -620,17 +639,16 @@ export default function App() {
       setSaveError("");
       setTimelineZoom(1);
       setActiveTime(0);
-      if (loaded.active_job_id) {
-        try {
-          const active = await api<Job>(`/jobs/${loaded.active_job_id}`);
-          setJob(active);
-          setJobs((items) => [
-            active,
-            ...items.filter((item) => item.id !== active.id),
-          ]);
-        } catch {
-          /* job may have completed between reads */
+      if (active) {
+        if (active.kind === "auto_edit_job" && (active.status === "running" || active.status === "queued")) {
+          loadProjectOnDone.current = true;
+          setAutoEditOpen(true);
         }
+        setJob(active);
+        setJobs((items) => [
+          active,
+          ...items.filter((item) => item.id !== active.id),
+        ]);
       }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not open project.");
@@ -1045,6 +1063,25 @@ export default function App() {
       setAnalysisSubmitting(false);
     }
   }
+  async function makeAutoEdit(brief: EditBrief) {
+    if (!project || isBusy || analysisSubmitting) return;
+    setAnalysisSubmitting(true);
+    setError("");
+    setNotice("");
+    try {
+      if (!(await flushQueuedSaves())) return;
+      const next = await api<Job>(`/projects/${project.id}/auto-edit`, {
+        method: "POST",
+        body: JSON.stringify(brief),
+      });
+      loadProjectOnDone.current = true;
+      await startJob(next);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not start the edit.");
+    } finally {
+      setAnalysisSubmitting(false);
+    }
+  }
   async function transcribe(
     options: TranscriptionOptions = {
       scope: "source",
@@ -1127,6 +1164,7 @@ export default function App() {
   async function retryJob(id: string) {
     try {
       const next = await api<Job>(`/jobs/${id}/retry`, { method: "POST" });
+      if (next.kind === "auto_edit_job") loadProjectOnDone.current = true;
       setJob(next);
       setJobs((items) => [next, ...items.filter((item) => item.id !== id)]);
       setNotice("Job reconnected");
@@ -1489,7 +1527,12 @@ export default function App() {
               )}
             </div>
             <div className="header-actions">
-              <div className="workspace-toggle" hidden={showSetup}>
+              {!autoEditOpen && (
+                <button className="secondary-action" onClick={() => setAutoEditOpen(true)}>
+                  <Clapperboard size={16} /> Auto edit
+                </button>
+              )}
+              <div className="workspace-toggle" hidden={showSetup || autoEditOpen}>
                 <button
                   className={workspaceMode === "edit" ? "active" : ""}
                   onClick={() => setWorkspaceMode("edit")}
@@ -1530,7 +1573,7 @@ export default function App() {
               </button>
             </div>
           </header>
-          <nav className="editor-journey" aria-label="Project workflow">
+          {!autoEditOpen && <nav className="editor-journey" aria-label="Project workflow">
             <button
               aria-current={showSetup ? "step" : undefined}
               onClick={() => setShowSetup(true)}
@@ -1560,8 +1603,24 @@ export default function App() {
               3. Review
             </button>
             <button onClick={() => navigatePage("exports")}>4. Deliver</button>
-          </nav>
-          {showSetup && project ? (
+          </nav>}
+          {autoEditOpen && project ? (
+            <AutoEdit
+              key={`${project.id}:${project.auto_edit?.job_id ?? ""}`}
+              project={project}
+              clips={clips}
+              job={job?.project_id === project.id ? job : null}
+              busy={isBusy || analysisSubmitting}
+              onMake={makeAutoEdit}
+              onExport={exportClips}
+              onManual={(clip) => {
+                setAutoEditOpen(false);
+                setShowSetup(!clips.length);
+                setWorkspaceMode("edit");
+                if (clip) void workOnClip(clip);
+              }}
+            />
+          ) : showSetup && project ? (
             <ClipSetup
               key={project.id}
               project={project}
@@ -2515,6 +2574,7 @@ export default function App() {
         page={page}
         onNavigate={navigatePage}
         onReveal={(target) => {
+          setAutoEditOpen(false);
           if (target === "editor-generation" || target.startsWith("setup-")) {
             setShowSetup(true);
             setTourSetupStep(
@@ -2628,6 +2688,7 @@ export default function App() {
           onUrl={setUrl}
           onFile={importFile}
           onYoutube={importYoutube}
+          onDemo={loadDemo}
           onInspect={(sourceUrl, signal) =>
             api("/sources/youtube/inspect", {
               method: "POST",
