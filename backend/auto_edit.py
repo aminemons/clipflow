@@ -7,6 +7,7 @@ from pydantic import Field, StrictBool
 
 from .clip_generation import GenerateInput, SetupModel, generate_clips
 from .motion_graphics import MAX_TEXT, valid_motion_graphic
+from .pacing import plan_pause_cuts
 
 
 class AutoEditInput(SetupModel):
@@ -54,14 +55,30 @@ def auto_edit(api, item, project_id, body):
     )
 
     @contextmanager
-    def finish(source, clips):
+    def finish(source, clips, transcript):
         # Previews use the final settings and live under the same cleanup rules
         # as editor proofs. Remove the entire staged batch if any render fails.
         output_dir = api.store.files / project_id
         output_dir.mkdir(exist_ok=True)
         files = []
         try:
+            # Preserve alternate-language and commentary tracks. The pacing
+            # analysis works on the same single audio track it will assemble.
+            can_tighten = use_speech and transcript and sum(
+                stream.get("codec_type") == "audio"
+                for stream in api.media.probe(source).get("streams", [])
+            ) == 1
             for index, clip in enumerate(clips):
+                if can_tighten:
+                    api.update(item, f"Checking pacing in cut {index + 1} of {len(clips)}",
+                               94 + int(5 * index / len(clips)))
+                    cuts = plan_pause_cuts(
+                        clip, transcript,
+                        lambda start, end: api.media.detect_silence(source, start, end),
+                        brisk=style == "social",
+                    )
+                    if cuts:
+                        clip["pause_cuts"] = cuts
                 text = opening
                 if not text and style == "social" and clip["transcript"]:
                     # Existing local ranking derives the title from the actual dialogue.

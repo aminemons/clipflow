@@ -1189,7 +1189,8 @@ def transcribe_job(item: dict, project_id: str, options: dict | None = None):
             else [c for c in latest["clips"] if "transcript" not in c]
         )
         for clip in affected:
-            if not clip.get("caption_text"):
+            pacing_changed = clip_id and clip.pop("pause_cuts", None)
+            if pacing_changed or not clip.get("caption_text"):
                 clip["revision"] = clip.get("revision", 1) + 1
                 clip["status"] = "draft"
                 clip.pop("download_url", None)
@@ -2287,6 +2288,8 @@ def import_transcript(project_id: str, body: TranscriptInput):
             ]
         )
         for clip in affected_clips:
+            if body.clip_id:
+                clip.pop("pause_cuts", None)
             if body.clip_id or not clip.get("caption_text"):
                 clip["revision"] = int(clip.get("revision", 1)) + 1
                 clip["status"] = "draft"

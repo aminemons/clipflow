@@ -92,6 +92,25 @@ def test_package_uses_fixed_archive_names_and_json_safe_jsx(tmp_path):
         assert '"captionColor": "#ffffff"' in jsx
 
 
+def test_package_keeps_pause_cuts_editable_and_retimes_scoped_captions(tmp_path):
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"data")
+    project = _project()
+    clip = project["clips"][0]
+    clip.update(pause_cuts=[{"start": 2, "end": 3}], transcript=[
+        {"start": 1.1, "end": 1.8, "text": "Setup"},
+        {"start": 3.2, "end": 3.8, "text": "Payoff"},
+    ])
+    with _archive(stream_package(project, [clip], source, has_audio=True)) as archive:
+        xml = ET.fromstring(archive.read("Premiere.xml"))
+        pieces = xml.findall(".//video/track/clipitem")
+        assert [(p.findtext("in"), p.findtext("out")) for p in pieces] == [("30", "60"), ("90", "120")]
+        assert xml.findtext("sequence/duration") == "60"
+        assert "00:00:01,200 --> 00:00:01,800\nPayoff" in archive.read("captions.srt").decode()
+        jsx = archive.read("after-effects.jsx").decode()
+        assert '"sourceRanges": [{"start": 1.0, "end": 2.0}, {"start": 3.0, "end": 4.0}]' in jsx
+
+
 def test_prepare_rejects_bad_ids_timing_and_missing_source(tmp_path):
     source = tmp_path / "source.mp4"
     source.write_bytes(b"data")
@@ -158,7 +177,7 @@ def test_sequence_srt_uses_raw_source_time_when_premiere_omits_speed(tmp_path):
         assert "00:00:00,000 --> 00:00:01,000" in srt
         jsx = archive.read("after-effects.jsx").decode()
         assert "layer.stretch = 100 / clip.speed" in jsx
-        assert "layer.startTime = -clip.start / clip.speed" in jsx
+        assert "layer.startTime = offset - range.start / clip.speed" in jsx
 
 
 def test_disabled_captions_do_not_reappear_from_transcript(tmp_path):

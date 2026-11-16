@@ -14,10 +14,19 @@ export type EditBrief = {
 };
 
 const recipes = [
-  { id: "story", name: "Story cut", detail: "Keep the setup and payoff. Use steady framing and clean subtitles." },
-  { id: "social", name: "Social cut", detail: "Find a shorter moment with a clear hook, stronger captions and a closer crop." },
+  { id: "story", name: "Story cut", detail: "Keep the setup and payoff. Shorten long pauses and use steady framing." },
+  { id: "social", name: "Social cut", detail: "Find a strong hook, tighten the pace and use bolder captions." },
   { id: "visual", name: "Visual cut", detail: "Pick a moment from movement and scene changes. Keep the whole shot in view." },
 ] as const;
+
+const innerPauses = (clip: Clip) =>
+  clip.pause_cuts?.filter((gap) => clip.start < gap.start && gap.end < clip.end) ?? [];
+
+const removedSeconds = (clip: Clip) =>
+  innerPauses(clip).reduce((seconds, gap) => seconds + gap.end - gap.start, 0);
+
+const cutDuration = (clip: Clip) =>
+  Math.round((clip.end - clip.start - removedSeconds(clip)) / (clip.playback_speed ?? 1));
 
 export default function AutoEdit({
   project, clips, job, busy, onMake, onManual, onExport,
@@ -60,7 +69,7 @@ export default function AutoEdit({
         <div className="auto-screen-label">
           <Film size={16} />
           {cut ? "Rendered first cut" : "Source footage"}
-          {cut && <span>{cut.aspect_ratio} · {Math.round(cut.end - cut.start)} sec</span>}
+          {cut && <span>{cut.aspect_ratio} · {cutDuration(cut)} sec</span>}
         </div>
         <div className="auto-player">
           {cut ? (
@@ -84,7 +93,7 @@ export default function AutoEdit({
             {drafts.map((clip, index) => (
               <button type="button" key={clip.id} aria-pressed={cut?.id === clip.id}
                 onClick={() => setChoice(clip.id)}>
-                <Play size={14} /> Cut {index + 1} <span>{Math.round(clip.end - clip.start)} sec</span>
+                <Play size={14} /> Cut {index + 1} <span>{cutDuration(clip)} sec</span>
               </button>
             ))}
           </div>
@@ -165,6 +174,12 @@ export default function AutoEdit({
             {cut.reason && <p>Why this moment: {cut.reason}.</p>}
             <dl>
               <div><dt>Style</dt><dd>{recipe?.name}</dd></div>
+              {innerPauses(cut).length > 0 && (
+                <div>
+                  <dt>Pauses shortened</dt>
+                  <dd>{innerPauses(cut).length} · {removedSeconds(cut).toFixed(1)} sec saved</dd>
+                </div>
+              )}
               <div><dt>Subtitles</dt><dd>{cut.caption_enabled && cut.transcript?.length
                 ? "Added"
                 : batch?.visible_captions ? "From the source" : "Off"}</dd></div>

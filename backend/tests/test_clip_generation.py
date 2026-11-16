@@ -5,7 +5,16 @@ import pytest
 
 from backend import app, highlights
 from backend.clip_generation import generate_clips
+from backend.pacing import plan_pause_cuts
 from backend.store import Store
+
+
+def test_pacing_keeps_a_transcript_gap_when_audio_continues():
+    clip = {"start": 0, "end": 10}
+    transcript = [{"start": 0, "end": 2}, {"start": 5, "end": 9}]
+    assert plan_pause_cuts(clip, transcript, lambda *_: [], brisk=True) == []
+    # Quiet alone is insufficient when it overlaps a spoken segment.
+    assert plan_pause_cuts(clip, transcript, lambda *_: [(5.2, 7)], brisk=True) == []
 
 
 def _project(store, project_id="generate-test"):

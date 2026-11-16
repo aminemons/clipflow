@@ -14,6 +14,7 @@ from urllib.parse import quote
 import xml.etree.ElementTree as ET
 
 from .media import aspect_dimensions, srt_for_clip
+from .pacing import retained_ranges
 
 
 _ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
@@ -155,7 +156,7 @@ def _xml(
     root = ET.Element("xmeml", version="5")
     sequence = _node(root, "sequence")
     _node(sequence, "name", str(project.get("title") or "Clipflow handoff"))
-    _node(sequence, "duration", sum(_frames(c["end"] - c["start"], fps) for c in clips))
+    _node(sequence, "duration", sum(_clip_frames(c, fps) for c in clips))
     _rate(sequence, fps)
     media = _node(sequence, "media")
     video = _node(media, "video")
@@ -247,15 +248,25 @@ def _jsx(project_title: str, clips: list[dict], media_name: str) -> str:
     footage.parentFolder = folder;
     for (var i = 0; i < data.clips.length; i++) {
         var clip = data.clips[i];
-        var duration = (clip.end - clip.start) / clip.speed;
+        var ranges = clip.sourceRanges || [{start: clip.start, end: clip.end}];
+        var duration = 0;
+        for (var k = 0; k < ranges.length; k++) {
+            duration += (ranges[k].end - ranges[k].start) / clip.speed;
+        }
         var comp = project.items.addComp(clip.title, clip.width, clip.height, 1, duration, clip.fps);
         comp.parentFolder = folder;
-        var layer = comp.layers.add(footage);
-        layer.name = clip.title + " source";
-        layer.stretch = 100 / clip.speed;
-        layer.startTime = -clip.start / clip.speed;
-        layer.inPoint = 0;
-        layer.outPoint = duration;
+        var offset = 0;
+        for (var k = 0; k < ranges.length; k++) {
+            var range = ranges[k];
+            var length = (range.end - range.start) / clip.speed;
+            var layer = comp.layers.add(footage);
+            layer.name = clip.title + " source " + (k + 1);
+            layer.stretch = 100 / clip.speed;
+            layer.startTime = offset - range.start / clip.speed;
+            layer.inPoint = offset;
+            layer.outPoint = offset + length;
+            offset += length;
+        }
         for (var j = 0; j < clip.captions.length; j++) {
             var cue = clip.captions[j];
             var textLayer = comp.layers.addText(cue.text);
@@ -285,11 +296,6 @@ def _caption_cues(raw: dict, clip: dict, project: dict) -> list[dict]:
     if not clip["captionEnabled"]:
         return []
     color = clip["captionColor"]
-    text = clip["caption"]
-    if text:
-        duration = (clip["end"] - clip["start"]) / clip["speed"]
-        return [{"start": 0, "end": duration, "text": text, "color": color}]
-
     transcript = raw.get("transcript", project.get("transcript", []))
     srt = srt_for_clip(raw, transcript)
     if not srt.strip():
@@ -367,6 +373,11 @@ def prepare(project: dict, clips: list[dict], source: Path) -> tuple[list[dict],
             "captions": [],
         }
         clean_clip["captions"] = _caption_cues(raw, clean_clip, project)
+        spans = retained_ranges(raw)
+        if len(spans) > 1:
+            clean_clip["sourceRanges"] = [
+                {"start": round(start + a, 3), "end": round(start + b, 3)} for a, b in spans
+            ]
         clean.append(clean_clip)
     safe_name = source.name
     if safe_name in {"", ".", ".."} or "/" in safe_name or "\\" in safe_name:
@@ -388,6 +399,7 @@ def _manifest(project: dict, clips: list[dict], media_name: str) -> dict:
         "Premiere uses the first selected clip's canvas when selected clips have different aspect ratios; clips with other ratios will be scaled into that sequence.",
         "SRT cues use source-speed timing. Retiming captions may be needed after reapplying playback speed in Premiere.",
         "After Effects script creates editable source layers and caption text layers. Adaptive camera tracking, motion graphics, and rendered Clipflow effects are not reconstructed.",
+        "Automatic pause cuts become separate source ranges in the editable sequences. The manifest records removed source timestamps in pause_cuts.",
         "Reapply playback speed in Premiere using the values in this manifest.",
         "Premiere XML media paths are package-relative hints. If Premiere reports offline media, relink to the media folder extracted from this ZIP.",
         "The After Effects script creates a new project; if an existing project has unsaved changes, After Effects may prompt before opening the new project. Save the resulting AEP alongside the extracted media folder.",
@@ -415,7 +427,7 @@ def _package_readme(project: dict, media_name: str, has_audio: bool) -> str:
         "AE may ask whether to save it before creating the new project. Keep the extracted media folder beside the AEP when moving it.\n"
         "4. Import captions.srt into Premiere and place it at the start of the sequence for editable caption cues.\n\n"
         "This is a conservative edit handoff. Clipflow crop/reframe, adaptive camera movement, denoise, caption appearance, "
-        "and other rendered effects, including motion graphics, are not recreated. The manifest retains supported clip settings for reference. "
+        "and other rendered effects, including motion graphics, are not recreated. Automatic pause cuts are included as editable source ranges. "
         "The ZIP includes the original source once; rendered outputs are not included and are not a visual match to the Clipflow render.\n"
     )
 
@@ -428,12 +440,21 @@ def _package_parts(
     audio_channels: int,
 ):
     clean, media_name, fps = prepare(project, clips, source)
+    sequence_clips = []
+    for raw, clip in zip(clips, clean):
+        for source_range in clip.get("sourceRanges", [{"start": clip["start"], "end": clip["end"]}]):
+            sequence_clips.append({
+                **clip,
+                **source_range,
+                "caption_text": clip["caption"],
+                "transcript": raw.get("transcript", project.get("transcript", [])),
+            })
     manifest = _manifest(project, clips, media_name)
     title = str(project.get("title") or "Clipflow handoff")
     readme = _package_readme(project, media_name, has_audio)
     content = [
-        ("Premiere.xml", _xml(project, clean, media_name, fps, has_audio, audio_channels)),
-        ("captions.srt", _sequence_srt(clean, project).encode("utf-8")),
+        ("Premiere.xml", _xml(project, sequence_clips, media_name, fps, has_audio, audio_channels)),
+        ("captions.srt", _sequence_srt(sequence_clips, project).encode("utf-8")),
         ("after-effects.jsx", _jsx(title, clean, media_name).encode("utf-8")),
         (
             "manifest.json",

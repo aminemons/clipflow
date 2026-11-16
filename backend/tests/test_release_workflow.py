@@ -253,6 +253,46 @@ def test_social_auto_edit_uses_transcript_for_captions_and_opening(tmp_path, iso
     assert project["transcript"][0]["text"].startswith(clip["motion_graphic"]["text"])
 
 
+def test_auto_edit_assembles_pause_cuts_and_retimes_captions(tmp_path, isolated_app):
+    source = tmp_path / "long-pause.mp4"
+    subprocess.run(
+        [api.media.FFMPEG, "-y", "-f", "lavfi", "-i", "color=c=blue:s=320x180:r=30",
+         "-f", "lavfi", "-i", r"aevalsrc=if(between(t\,2\,4)\,0\,0.2*sin(880*PI*t)):s=16000",
+         "-t", "8", "-c:v", "libx264", "-c:a", "aac", str(source)],
+        check=True, capture_output=True,
+    )
+    quiet, = api.media.detect_silence(source, 1, 7)
+    assert quiet == pytest.approx((2, 4), abs=.08)
+    project = api.create_project(source, "Pacing demo")
+    project["transcript"] = [
+        {"start": .1, "end": 2, "text": "Here is the setup."},
+        {"start": 4, "end": 7.8, "text": "Here is the payoff."},
+    ]
+    api.store.save(project)
+    root = f"/api/projects/{project['id']}"
+    started = client.post(f"{root}/auto-edit", json={"style": "social", "format": "16:9"})
+    assert started.status_code == 200, started.text
+    job = wait_job(started.json()["id"])
+    clip, = api.store.get(project["id"])["clips"]
+    gap, = clip["pause_cuts"]
+    removed = gap["end"] - gap["start"]
+    assert 2 < gap["start"] < gap["end"] < 4 and removed > 1.5
+    path = api.store.files / project["id"] / f"preview-{clip['id']}-{job['id']}.mp4"
+    assert api.media.metadata(path)[0] == pytest.approx(clip["end"] - clip["start"] - removed, abs=.15)
+    streams = api.media.probe(path)["streams"]
+    audio = next(stream for stream in streams if stream["codec_type"] == "audio")
+    video = next(stream for stream in streams if stream["codec_type"] == "video")
+    assert float(audio["duration"]) == pytest.approx(float(video["duration"]), abs=.1)
+    captions = client.get(f"{root}/clips/{clip['id']}/captions").text
+    assert f"{api.media._safe_time(4 - clip['start'] - removed)} -->" in captions
+    assert "Here is the payoff." in captions
+
+    edited = client.patch(f"{root}/clips/{clip['id']}", json={"end": gap["end"] - .1})
+    assert edited.status_code == 200
+    assert len(api.media.retained_ranges(edited.json())) == 1
+    assert edited.json()["pause_cuts"] == clip["pause_cuts"]
+
+
 def test_silent_source_smart_skips_moments_while_full_covers_every_second(tmp_path, isolated_app):
     source = tmp_path / "silent-source.mp4"
     subprocess.run(

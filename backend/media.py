@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Callable
 from .caption_layout import caption_cues, font_name, fonts_directory, word_caption_cues
 from .motion_graphics import graphic_dialogue
+from .pacing import retained_ranges, retime_rows
 
 from .camera import (
     CameraController,
@@ -187,9 +188,12 @@ def srt_for_clip(
                 for cue_start, cue_end, cue_text in timed
             )
     manual = str(clip.get("caption_text", "")).strip()
+    spans = retained_ranges(clip) if not for_render else [(0.0, end - start)]
     if manual:
-        rows = [(0.0, (end - start) * scale, manual)]
-    elif scale != 1.0:
+        rows = [(0.0, sum(b - a for a, b in spans), manual)]
+    elif len(spans) > 1:
+        rows = retime_rows(rows, spans)
+    if scale != 1.0:
         rows = [(a * scale, b * scale, text) for a, b, text in rows]
     return "\n\n".join(
         f"{i}\n{_safe_time(a)} --> {_safe_time(b)}\n{text}"
@@ -197,7 +201,9 @@ def srt_for_clip(
     ) + ("\n" if rows else "")
 
 
-def detect_silence(path: str | Path) -> list[tuple[float, float]]:
+def detect_silence(
+    path: str | Path, start: float = 0.0, end: float | None = None,
+) -> list[tuple[float, float]]:
     try:
         _check_cancel()
         r = run(
@@ -206,8 +212,10 @@ def detect_silence(path: str | Path) -> list[tuple[float, float]]:
                 "-hide_banner",
                 "-vn",
                 "-sn",
+                *(["-ss", f"{start:.3f}"] if start else []),
                 "-i",
                 str(path),
+                *(["-t", f"{end - start:.3f}", "-map", "0:a:0"] if end is not None else []),
                 "-af",
                 "silencedetect=n=-35dB:d=0.35",
                 "-f",
@@ -223,7 +231,7 @@ def detect_silence(path: str | Path) -> list[tuple[float, float]]:
                 starts.append(float(m.group(1)))
             m = re.search(r"silence_end: ([\d.]+)", line)
             if m and starts:
-                ranges.append((starts.pop(0), float(m.group(1))))
+                ranges.append((start + starts.pop(0), start + float(m.group(1))))
         return ranges
     except Exception as exc:
         # JobCancelled is defined by the API layer; avoid importing it here,
@@ -679,6 +687,21 @@ def render_clip(
     _postprocess_effects(out, clip, progress)
 
 
+def _pace_filters(spans, audio: bool, speed: float, audio_filters: list[str]) -> str:
+    filters = []
+    for i, (a, b) in enumerate(spans):
+        interval = f"start={a:.3f}:end={b:.3f}"
+        filters.append(f"[0:v:0]trim={interval},setpts=PTS-STARTPTS[v{i}]")
+        if audio:
+            filters.append(f"[0:a:0]atrim={interval},asetpts=PTS-STARTPTS[a{i}]")
+    video = "".join(f"[v{i}]" for i in range(len(spans)))
+    filters.append(f"{video}concat=n={len(spans)}:v=1:a=0,setpts=PTS/{speed:.6f}[picture]")
+    if audio:
+        sound = "".join(f"[a{i}]" for i in range(len(spans)))
+        filters.append(f"{sound}concat=n={len(spans)}:v=0:a=1,{','.join(audio_filters)}[sound]")
+    return ";".join(filters)
+
+
 def _postprocess_effects(
     out: str | Path, clip: dict, progress: Progress | None = None
 ) -> None:
@@ -692,12 +715,15 @@ def _postprocess_effects(
     volume = _audio_volume(clip)
     denoise = bool(clip.get("audio_denoise", False))
     fade = _audio_fade(clip)
-    if speed == 1.0 and volume == 1.0 and not denoise and fade == 0.0:
+    spans = retained_ranges(clip)
+    paced = len(spans) > 1
+    if not paced and speed == 1.0 and volume == 1.0 and not denoise and fade == 0.0:
         return
     source = Path(out)
     # Probe the captioned output, since the actual stream duration can differ
     # slightly from the requested clip duration after frame-rate conversion.
-    output_duration = max(0.01, float(metadata(source)[0] or 0.01) / speed)
+    duration = sum(b - a for a, b in spans) if paced else float(metadata(source)[0] or 0.01)
+    output_duration = max(0.01, duration / speed)
     fade = min(fade, output_duration / 2.0)
     audio_filters = [f"atempo={speed:.6f}", f"volume={volume:.6f}"]
     if denoise:
@@ -711,19 +737,25 @@ def _postprocess_effects(
         )
     temp = source.with_suffix(".effects.mp4")
     temp.unlink(missing_ok=True)
+    if paced:
+        audio = any(stream.get("codec_type") == "audio" for stream in probe(source).get("streams", []))
+        mapping = [
+            "-filter_complex", _pace_filters(spans, audio, speed, audio_filters),
+            "-map", "[picture]",
+            *(["-map", "[sound]"] if audio else []),
+        ]
+    else:
+        mapping = [
+            "-map", "0:v:0", "-map", "0:a?",
+            "-vf", f"setpts=PTS/{speed:.6f}",
+            "-af", ",".join(audio_filters),
+        ]
     args = [
         FFMPEG,
         "-y",
         "-i",
         str(source),
-        "-map",
-        "0:v:0",
-        "-map",
-        "0:a?",
-        "-vf",
-        f"setpts=PTS/{speed:.6f}",
-        "-af",
-        ",".join(audio_filters),
+        *mapping,
         "-c:v",
         "libx264",
         "-preset",

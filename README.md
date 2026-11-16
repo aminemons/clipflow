@@ -74,6 +74,8 @@ New projects open in **Auto edit**. Choose a Story, Social, or Visual cut and a 
 
 Auto edit uses local analysis and reuses available timed subtitles or a complete local speech model. Without a model or timed subtitles, it can make a visual draft. Enable the one-time local model download in **Title, alternate cuts and captions** if you want speech-based selection and captions. The same options let you keep existing captions on screen without adding a second layer.
 
+Story and Social cuts can shorten long pauses when speech timings and the audio agree. Clipflow preserves breathing room, shows the time removed, and shifts captions to match the assembled cut. Clips with multiple audio tracks retain their original pacing. The Adobe handoff includes the retained source ranges so an editor can adjust each cut.
+
 ### 1. Import
 
 Upload an MP4, MOV, or WebM file, or inspect a public YouTube link and choose an available download quality.

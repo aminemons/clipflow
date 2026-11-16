@@ -222,7 +222,7 @@ def generate_clips(api, item: dict, project_id: str, payload: dict, *, finish=No
         api.validate_clip(clip, duration)
         prepared.append(clip)
     api.check_cancelled(item)
-    with (finish(source, prepared) if finish else nullcontext()) as auto_batch:
+    with (finish(source, prepared, transcript) if finish else nullcontext()) as auto_batch:
         with api.projects_lock:
             latest = api.store.get(project_id)
             if not latest or int(latest.get("edit_revision", 0)) != revision:

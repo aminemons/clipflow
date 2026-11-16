@@ -5,6 +5,7 @@ export type Clip = {
   id: string;
   generation_id?: string;
   auto_proof?: { job_id: string; revision: number };
+  pause_cuts?: { start: number; end: number }[];
   title: string;
   start: number;
   end: number;
