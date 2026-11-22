@@ -6,6 +6,7 @@ import { runRecipe, transcribeWave, validKey, validRecipe } from "./shared/opena
 
 const scheme = "clipflow-studio";
 const home = `${scheme}://local/browser.html`;
+const isEditorUrl = value => typeof value === "string" && value.split("#", 1)[0] === home;
 const directory = join(import.meta.dirname, "renderer");
 const requests = new Map();
 const csp = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; media-src 'self' blob:; connect-src 'self' blob:; worker-src 'self' blob:; object-src 'none'; base-uri 'self'";
@@ -33,7 +34,7 @@ const vault = {
 
 function register(channel, handler) {
   ipcMain.handle(`clipflow:${channel}`, (event, ...args) => {
-    if (!window || event.sender !== window.webContents || event.senderFrame?.url !== home) throw new Error("This request came from outside the local editor.");
+    if (!window || event.sender !== window.webContents || !isEditorUrl(event.senderFrame?.url)) throw new Error("This request came from outside the local editor.");
     return handler(...args);
   });
 }
@@ -114,10 +115,10 @@ app.whenReady().then(() => {
       webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false, preload: join(import.meta.dirname, "preload.cjs") },
     });
     window.webContents.setWindowOpenHandler(({ url }) => {
-      if (["https://commons.wikimedia.org/wiki/File:Fog_covering_mountain_time_lapse.webm", "https://github.com/aminemons/clipflow/releases"].includes(url)) void shell.openExternal(url);
+      if (["https://commons.wikimedia.org/wiki/File:Fog_covering_mountain_time_lapse.webm", "https://github.com/aminemons/clipflow/releases", "https://clipflow-aminemons.vercel.app/index.html"].includes(url)) void shell.openExternal(url);
       return { action: "deny" };
     });
-    window.webContents.on("will-navigate", (event, url) => { if (url !== home) event.preventDefault(); });
+    window.webContents.on("will-navigate", (event, url) => { if (!isEditorUrl(url)) event.preventDefault(); });
     window.webContents.session.setPermissionRequestHandler((_target, _permission, callback) => callback(false));
     void window.loadURL(home);
   }

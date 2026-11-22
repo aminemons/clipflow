@@ -1,4 +1,4 @@
-const version = "clipflow-studio-v3";
+const version = "clipflow-studio-v4";
 const shell = ["/browser.html", "/studio.webmanifest", "/studio/icon.svg", "/studio/icon-192.png", "/studio/icon-512.png", "/studio/sample.webp", "/studio/sample.mp4", "/fonts/Outfit.ttf", "/fonts/Anton.ttf", "/fonts/NotoSansArabic.ttf"];
 self.addEventListener("install", event => {
   event.waitUntil((async () => {
@@ -8,7 +8,10 @@ self.addEventListener("install", event => {
     const html = await response.clone().text();
     await cache.put("/browser.html", response);
     const assets = [...html.matchAll(/(?:src|href)="(\/assets\/[^"]+)"/g)].map(match => match[1]);
-    await cache.addAll([...shell.slice(1), ...assets]);
+    const manifest = await fetch("/clipflow-assets.json", { cache: "reload" });
+    if (!manifest.ok) throw new Error("Studio assets are unavailable.");
+    const generated = await manifest.json();
+    await cache.addAll([...new Set([...shell.slice(1), ...assets, ...generated])]);
     await self.skipWaiting();
   })());
 });
