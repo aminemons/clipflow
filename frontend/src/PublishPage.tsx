@@ -1,3 +1,4 @@
+import { browserWorkspace, cloudWorkspace } from "./browser/mode";
 import { useEffect, useState } from "react";
 import {
   Check,
@@ -96,7 +97,7 @@ export default function PublishPage({
       (a) => a.clip_id === clip.id && a.valid && a.status === "approved",
     );
   const ready = (clip: Clip) =>
-    clip.status === "exported" && !!clip.download_url?.includes("/exports/");
+    clip.status === "exported" && !!clip.download_url && (browserWorkspace || clip.download_url.includes("/exports/"));
   const eligible = project?.clips.filter(ready) || [];
 
   // Read-only polling keeps completed renders and remote publishing attempts visible.
@@ -241,6 +242,7 @@ export default function PublishPage({
       <header className="page-heading">
         <div>
           <h1>Review & publish</h1>
+          {browserWorkspace && <p>Review and approve on this device. Direct posting is available in the <a href={cloudWorkspace} target="_blank" rel="noreferrer">full workspace</a>.</p>}
           <p>
             Review the rendered files, approve your choices, then confirm where
             they go.
@@ -566,7 +568,7 @@ export default function PublishPage({
                 <video src={preview.download_url} controls playsInline />
                 <a
                   href={preview.download_url}
-                  download
+                  download={preview.download_name || true}
                   className="secondary-action"
                 >
                   <Download size={16} />

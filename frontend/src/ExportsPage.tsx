@@ -211,7 +211,7 @@ export default function ExportsPage({
                         <a
                           className="primary-action"
                           href={j.download_url}
-                          download
+                          download={j.download_name || true}
                         >
                           <Download size={16} />
                           {batch ? "Download ZIP" : "Download"}
@@ -268,7 +268,7 @@ export default function ExportsPage({
               </button>
             </header>
             <video src={preview.download_url} controls autoPlay playsInline />
-            <a href={preview.download_url} download className="primary-action">
+            <a href={preview.download_url} download={preview.download_name || true} className="primary-action">
               <Download size={16} />
               Download this version
             </a>

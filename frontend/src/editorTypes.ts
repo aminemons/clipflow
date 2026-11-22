@@ -5,6 +5,8 @@ export type Clip = {
   id: string;
   generation_id?: string;
   auto_proof?: { job_id: string; revision: number };
+  browser_proof_url?: string;
+  download_name?: string;
   pause_cuts?: { start: number; end: number }[];
   title: string;
   start: number;
@@ -83,6 +85,7 @@ export type Job = {
   error?: string;
   warning?: string;
   download_url?: string;
+  download_name?: string;
 };
 
 export type Health = {
@@ -108,7 +111,7 @@ export type Health = {
 };
 
 export type ProviderSettings = {
-  transcription_provider: "local" | "groq";
+  transcription_provider: "local" | "groq" | "openai";
   whisper_model:
     | ""
     | "tiny"

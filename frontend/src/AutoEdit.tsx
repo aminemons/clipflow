@@ -58,7 +58,7 @@ export default function AutoEdit({
   const cut = drafts.find((clip) => clip.id === choice) ?? drafts[0];
   const recipe = recipes.find((item) => item.id === batch?.style);
   const proof = cut?.auto_proof && (cut.revision ?? 1) === cut.auto_proof.revision
-    ? `/api/projects/${project.id}/clips/${cut.id}/previews/${cut.auto_proof.job_id}`
+    ? cut.browser_proof_url || `/api/projects/${project.id}/clips/${cut.id}/previews/${cut.auto_proof.job_id}`
     : "";
   const preview = cut?.download_url || proof;
   const showBrief = briefOpen || !cut;
@@ -185,7 +185,7 @@ export default function AutoEdit({
                 : batch?.visible_captions ? "From the source" : "Off"}</dd></div>
             </dl>
             {cut.download_url ? (
-              <a className="primary-action auto-submit" href={cut.download_url}><Download size={17} /> Download MP4</a>
+              <a className="primary-action auto-submit" href={cut.download_url} download={cut.download_name || true}><Download size={17} /> {cut.download_name?.endsWith(".webm") ? "Download WebM" : "Download MP4"}</a>
             ) : (
               <button className="primary-action auto-submit" disabled={busy} onClick={() => onExport([cut.id])}>
                 <Download size={17} /> Export this cut

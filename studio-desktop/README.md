@@ -1,6 +1,6 @@
 # Clipflow Studio Desktop
 
-Open **AI settings → Continue with ChatGPT** to connect an eligible ChatGPT Plus or Pro plan for GPT clip suggestions, graphic copy and publishing copy. Projects and footage are saved locally. Manual editing works without an account. Timed speech transcription currently uses the developer API key.
+Open **Settings → Processing & providers → Continue with ChatGPT** to connect an eligible ChatGPT Plus or Pro plan for GPT clip suggestions, graphic copy and publishing copy. Projects and footage are saved locally. Manual editing works without an account. Timed speech transcription currently uses the developer API key.
 
 The Windows portable release contains the full app. Extract the entire folder, then open `Clipflow.exe`.
 

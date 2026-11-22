@@ -1,3 +1,5 @@
+import { api } from "./apiClient";
+import type { ProviderSettings } from "./editorTypes";
 import { useEffect, useRef, useState } from "react";
 import { Mic2, Settings2 } from "lucide-react";
 import "./TranscriptionControls.css";
@@ -50,8 +52,7 @@ export default function TranscriptionControls({
   const [error, setError] = useState("");
   const initialized = useRef<string | null>(null);
   useEffect(() => {
-    fetch("/api/settings")
-      .then((response) => (response.ok ? response.json() : null))
+    api<ProviderSettings & { transcription_quality?: TranscriptionRequest["quality"]; transcription_language?: string; transcription_dialect?: TranscriptionRequest["dialect"]; transcription_prompt?: string }>("/settings")
       .then((settings) => {
         if (!settings) return;
         setProvider(settings.transcription_provider);
@@ -92,7 +93,7 @@ export default function TranscriptionControls({
           onClick={onOpenSettings}
         >
           <Settings2 size={14} />
-          {provider === "groq" ? "Groq" : "On this computer"}
+          {provider === "groq" ? "Groq" : String(provider) === "openai" ? "OpenAI" : "On this computer"}
         </button>
       </div>
       <div className="speech-scope">

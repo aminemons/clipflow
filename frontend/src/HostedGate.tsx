@@ -1,3 +1,4 @@
+import { browserWorkspace } from "./browser/mode";
 import {
   FormEvent,
   ReactNode,
@@ -162,7 +163,7 @@ function LoginPanel({
 
 export function HostedGate({ children }: { children: ReactNode }) {
   const [mode, setMode] = useState<RuntimeMode>(
-    forcedHostedMode ? "hosted" : "unknown",
+    browserWorkspace ? "local" : forcedHostedMode ? "hosted" : "unknown",
   );
   const [status, setStatus] = useState<HostedStatus>("checking");
   const [userId, setUserId] = useState<string | null>(null);
@@ -171,6 +172,7 @@ export function HostedGate({ children }: { children: ReactNode }) {
   const expiredDialogRef = useDialogFocus<HTMLDivElement>(authExpired);
 
   useEffect(() => {
+    if (browserWorkspace) return;
     let active = true;
     readSession()
       .then((session) => {

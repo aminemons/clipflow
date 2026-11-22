@@ -7,7 +7,8 @@ This portable build is unsigned.
 Projects and footage are saved on this PC in the app's local data folder.
 Use Export > Save project backup to create a portable .clipflow file.
 
-For GPT editing, open AI settings and select Continue with ChatGPT.
+For GPT editing, open Settings > Processing & providers and select
+Continue with ChatGPT. Then pick OpenAI as the highlight provider.
 Approve plan usage in the browser for an eligible ChatGPT Plus or Pro
 account. Manual editing and project storage work without an account.
 The developer key field is for separately billed API requests.

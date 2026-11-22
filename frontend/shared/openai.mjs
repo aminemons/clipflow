@@ -34,12 +34,14 @@ export async function runRecipe(key, recipe, signal) {
   return text;
 }
 
-export async function transcribeWave(key, bytes, signal) {
+export async function transcribeWave(key, bytes, signal, hints) {
   const form = new FormData();
   form.append("file", new Blob([bytes], { type: "audio/wav" }), "clipflow.wav");
   form.set("model", "whisper-1");
   form.set("response_format", "verbose_json");
   form.append("timestamp_granularities[]", "segment");
+  if (typeof hints?.language === "string" && /^[a-z]{2}$/.test(hints.language)) form.set("language", hints.language);
+  if (typeof hints?.prompt === "string" && hints.prompt.trim()) form.set("prompt", hints.prompt.trim().slice(0, 350));
   const data = await readResponse(await fetch(`${api}/audio/transcriptions`, {
     method: "POST", headers: headers(key), body: form, signal,
   }));

@@ -1,8 +1,14 @@
-export const motionGraphics = [
+import { browserWorkspace } from "./browser/mode";
+import { motions } from "./studio/model";
+
+const standardGraphics = [
   { id: "opening", name: "Opening title", purpose: "Tell viewers what this clip is about.", example: "The decision that changed everything" },
   { id: "speaker", name: "Speaker ID", purpose: "Introduce a person while they speak.", example: "Maya Chen / Film editor" },
   { id: "callout", name: "Key takeaway", purpose: "Put one important number or idea on screen.", example: "3 days to finish the cut" },
 ] as const;
+
+const additionalGraphics = motions.slice(3).map(style => ({ id: style.id, name: style.label, purpose: style.detail, example: style.sample }));
+export const motionGraphics = browserWorkspace ? [...standardGraphics, ...additionalGraphics] : standardGraphics;
 
 export type MotionGraphic = {
   preset: (typeof motionGraphics)[number]["id"];

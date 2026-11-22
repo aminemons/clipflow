@@ -8,6 +8,6 @@ contextBridge.exposeInMainWorld("clipflowDesktop", {
   usage: () => invoke("usage"),
   run: (spec, id) => invoke("run", spec, id),
   runKey: (spec, key, id) => invoke("run-key", spec, key, id),
-  transcribe: (buffer, key, id) => invoke("transcribe", buffer, key, id),
+  transcribe: (buffer, key, id, hints) => invoke("transcribe", buffer, key, id, hints),
   cancel: id => invoke("cancel", id),
 });

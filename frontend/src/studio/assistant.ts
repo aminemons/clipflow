@@ -31,7 +31,7 @@ declare global {
       usage: () => Promise<void>;
       run: (spec: Recipe, id: string) => Promise<string>;
       runKey: (spec: Recipe, key: string, id: string) => Promise<string>;
-      transcribe: (buffer: ArrayBuffer, key: string, id: string) => Promise<SubtitleSegment[]>;
+      transcribe: (buffer: ArrayBuffer, key: string, id: string, hints?: TranscriptionHints) => Promise<SubtitleSegment[]>;
       cancel: (id: string) => Promise<void>;
     };
   }
@@ -71,7 +71,9 @@ export function requester(key: string, usingPlan: boolean): AIRequest {
   };
 }
 
-export async function transcriptFor(media: Blob, duration: number, key: string, signal: AbortSignal, onProgress: (value: string) => void) {
+type TranscriptionHints = { language?: string; prompt?: string };
+
+export async function transcriptFor(media: Blob, duration: number, key: string, signal: AbortSignal, onProgress: (value: string) => void, hints?: TranscriptionHints) {
   const { audioChunks } = await import("./media");
   const result: SubtitleSegment[] = [];
   for await (const chunk of audioChunks(media, duration, signal)) {
@@ -79,12 +81,12 @@ export async function transcriptFor(media: Blob, duration: number, key: string, 
     const audio = await chunk.file.arrayBuffer();
     const desktop = window.clipflowDesktop;
     let segments: SubtitleSegment[];
-    if (desktop) segments = await localRequest(id => desktop.transcribe(audio, key, id), signal);
+    if (desktop) segments = await localRequest(id => desktop.transcribe(audio, key, id, hints), signal);
     else {
       const bytes = new Uint8Array(audio);
       let binary = "";
       for (let i = 0; i < bytes.length; i += 8192) binary += String.fromCharCode(...bytes.subarray(i, i + 8192));
-      segments = (await relay({ task: "transcribe", audio: btoa(binary) }, key, signal)).segments;
+      segments = (await relay({ task: "transcribe", audio: btoa(binary), hints }, key, signal)).segments;
     }
     for (const segment of segments) {
       if (!Number.isFinite(segment.start) || !Number.isFinite(segment.end)) continue;

@@ -5,7 +5,7 @@ import { pathToFileURL } from "node:url";
 import { runRecipe, transcribeWave, validKey, validRecipe } from "./shared/openai.mjs";
 
 const scheme = "clipflow-studio";
-const home = `${scheme}://local/studio.html`;
+const home = `${scheme}://local/browser.html`;
 const directory = join(import.meta.dirname, "renderer");
 const requests = new Map();
 const csp = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; font-src 'self'; media-src 'self' blob:; connect-src 'self' blob:; worker-src 'self' blob:; object-src 'none'; base-uri 'self'";
@@ -102,9 +102,9 @@ app.whenReady().then(() => {
     if (!validKey(key) || !validRecipe(spec)) throw new Error("The OpenAI key or edit request is invalid.");
     return withOperation(id, signal => runRecipe(key, spec, signal));
   });
-  register("transcribe", (buffer, key, id) => {
+  register("transcribe", (buffer, key, id, hints) => {
     if (!validKey(key) || !(buffer instanceof ArrayBuffer) || buffer.byteLength < 44 || buffer.byteLength > 1_600_000 || Buffer.from(buffer, 0, 4).toString() !== "RIFF") throw new Error("The OpenAI key or audio chunk is invalid.");
-    return withOperation(id, signal => transcribeWave(key, buffer, signal));
+    return withOperation(id, signal => transcribeWave(key, buffer, signal, hints));
   });
 
   function open() {
@@ -114,7 +114,7 @@ app.whenReady().then(() => {
       webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false, preload: join(import.meta.dirname, "preload.cjs") },
     });
     window.webContents.setWindowOpenHandler(({ url }) => {
-      if (url === "https://commons.wikimedia.org/wiki/File:Fog_covering_mountain_time_lapse.webm") void shell.openExternal(url);
+      if (["https://commons.wikimedia.org/wiki/File:Fog_covering_mountain_time_lapse.webm", "https://github.com/aminemons/clipflow/releases"].includes(url)) void shell.openExternal(url);
       return { action: "deny" };
     });
     window.webContents.on("will-navigate", (event, url) => { if (url !== home) event.preventDefault(); });

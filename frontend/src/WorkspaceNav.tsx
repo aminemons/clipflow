@@ -1,6 +1,9 @@
+import { browserWorkspace, cloudWorkspace, desktopRelease } from "./browser/mode";
+import type {} from "./studio/assistant";
 import {
   Clapperboard,
   Download,
+  Cloud,
   FolderOpen,
   HelpCircle,
   Plus,
@@ -37,6 +40,7 @@ export default function WorkspaceNav({
   const { hosted } = useHostedAuth();
   const [desktopReady, setDesktopReady] = useState(false);
   useEffect(() => {
+    if (browserWorkspace) return;
     fetch("/api/desktop")
       .then((r) => (r.ok ? r.json() : null))
       .then((r) => setDesktopReady(!!r?.available))
@@ -96,17 +100,22 @@ export default function WorkspaceNav({
         </div>
       )}
       <div className="nav-bottom">
-        {desktopReady && (
+        {(desktopReady || browserWorkspace) && (
           <button
             title="Download Windows desktop app · unzip and run Clipflow.exe"
             onClick={() => {
-              window.location.href = "/api/desktop/download";
+              if (browserWorkspace) window.open(desktopRelease, "_blank", "noopener,noreferrer");
+              else window.location.href = "/api/desktop/download";
             }}
           >
             <Download size={18} />
             <span>Download desktop</span>
           </button>
         )}
+        {browserWorkspace && !window.clipflowDesktop && <button onClick={() => window.open(cloudWorkspace, "_blank", "noopener,noreferrer")} title="Full cloud workspace">
+          <Cloud size={18} />
+          <span>Cloud workspace</span>
+        </button>}
         <button onClick={onTour} title="Take a guided tour">
           <HelpCircle size={18} />
           <span>Take a tour</span>

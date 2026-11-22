@@ -1,3 +1,5 @@
+import { browserWorkspace } from "./browser/mode";
+import { download as downloadLocal } from "./studio/storage";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Activity,
@@ -325,7 +327,7 @@ export default function App() {
           next.download_url &&
           next.id === proofJobId.current
         ) {
-          setProofUrl(next.download_url + "?v=" + next.id);
+          setProofUrl(next.download_url.startsWith("blob:") ? next.download_url : next.download_url + "?v=" + next.id);
           setNotice("Rendered proof ready. Play to review the final clip.");
         }
         if (
@@ -1192,6 +1194,11 @@ export default function App() {
   async function downloadSrt(id: string) {
     if (!project) return;
     try {
+      if (browserWorkspace) {
+        const captions = await api<Blob>(`/projects/${project.id}/clips/${id}/captions`);
+        downloadLocal(captions, `${selected?.title || "captions"}.srt`);
+        return;
+      }
       const res = await fetch(
         `${API}/projects/${project.id}/clips/${id}/captions`,
       );
@@ -1282,8 +1289,18 @@ export default function App() {
     if (!project || !ids.length || isBusy) return;
     if (!(await flushQueuedSaves())) return;
     const query = encodeURIComponent(ids.join(","));
+    const path = `/projects/${encodeURIComponent(project.id)}/edit-package?clip_ids=${query}`;
+    if (browserWorkspace) {
+      try {
+        setNotice("Preparing editable Adobe handoff on this device.");
+        downloadLocal(await api<Blob>(path), `${project.id}-adobe-handoff.zip`);
+      } catch (error) {
+        setError(error instanceof Error ? error.message : "Could not prepare the Adobe package.");
+      }
+      return;
+    }
     const link = document.createElement("a");
-    link.href = `${API}/projects/${encodeURIComponent(project.id)}/edit-package?clip_ids=${query}`;
+    link.href = API + path;
     link.download = `${project.id}-adobe-handoff.zip`;
     document.body.append(link);
     link.click();
@@ -2759,8 +2776,9 @@ function MotionGraphicPanel({
 }) {
   const [preset, setPreset] = useState<MotionGraphic["preset"]>(graphic?.preset ?? "opening");
   const [text, setText] = useState(graphic?.text ?? "");
-  const recipe = motionGraphics.find((item) => item.id === preset)!;
-  const valid = text.trim() && !/\p{C}/u.test(text);
+  const recipe = motionGraphics.find((item) => item.id === preset) ?? motionGraphics[0];
+  const needsText = preset !== "flash" && preset !== "zoom";
+  const valid = !needsText || (text.trim() && !/\p{C}/u.test(text));
 
   return (
     <section className="settings-section motion-panel">
@@ -2783,10 +2801,10 @@ function MotionGraphicPanel({
           <span>{text.trim() || recipe.example}</span>
         </div>
         <small>{recipe.purpose}</small>
-        <label>
+        {needsText && <label>
           On-screen text
           <input value={text} maxLength={72} onChange={(event) => setText(event.target.value)} placeholder={recipe.example} />
-        </label>
+        </label>}
         <div className="motion-actions">
           <button className="primary-action" type="submit" disabled={!valid}>Apply graphic</button>
           {graphic && <button className="secondary-action" type="button" onClick={() => onApply(null)}>Remove</button>}

@@ -63,15 +63,18 @@ export async function waveform(source: Blob, duration: number, signal: AbortSign
 }
 
 export function audioGain(project: Project, time: number, total: number) {
-  const fade = project.cut.fade ? clamp(Math.min(time / 0.10, (total - time) / 0.16), 0, 1) : 1;
+  const fade = project.cut.fade ? clamp(Math.min(time / (project.cut.fadeSeconds || 0.10), (total - time) / (project.cut.fadeSeconds || 0.16)), 0, 1) : 1;
   return project.cut.volume / 100 * fade;
 }
 
 async function encodeAudio(track: InputAudioTrack, source: AudioSampleSource, project: Project, signal: AbortSignal) {
   const sink = new AudioSampleSink(track);
-  const total = lengthOf(project.cut.spans);
+  const speed = project.cut.speed ?? 1;
+  const total = lengthOf(project.cut.spans) / speed;
   let offset = 0;
   let writtenEnd = 0;
+  let filtered: Float32Array | undefined;
+  let previous: Float32Array | undefined;
   for (const span of project.cut.spans) {
     for await (const sample of sink.samples(span.start, span.end)) {
       try {
@@ -79,17 +82,32 @@ async function encodeAudio(track: InputAudioTrack, source: AudioSampleSource, pr
         const from = Math.max(0, Math.ceil((span.start - sample.timestamp) * sample.sampleRate - 1e-6));
         const to = Math.min(sample.numberOfFrames, Math.floor((span.end - sample.timestamp) * sample.sampleRate + 1e-6));
         if (to <= from) continue;
-        const timestamp = Math.max(writtenEnd, offset + sample.timestamp + from / sample.sampleRate - span.start);
-        const data = new Float32Array((to - from) * sample.numberOfChannels);
-        sample.copyTo(data, { format: "f32", planeIndex: 0, frameOffset: from, frameCount: to - from });
-        for (let frame = 0; frame < to - from; frame++) {
+        const inputIndex = offset + sample.timestamp + from / sample.sampleRate - span.start;
+        const timestamp = Math.max(writtenEnd, inputIndex / speed);
+        const channels = sample.numberOfChannels;
+        const inputData = new Float32Array((to - from) * channels);
+        sample.copyTo(inputData, { format: "f32", planeIndex: 0, frameOffset: from, frameCount: to - from });
+        const frames = Math.max(1, Math.round((to - from) / speed));
+        const data = speed === 1 ? inputData : new Float32Array(frames * channels);
+        filtered ??= new Float32Array(channels);
+        previous ??= new Float32Array(channels);
+        for (let frame = 0; frame < frames; frame++) {
           const gain = audioGain(project, timestamp + frame / sample.sampleRate, total);
-          for (let ch = 0; ch < sample.numberOfChannels; ch++) {
-            const index = frame * sample.numberOfChannels + ch;
-            data[index] = clamp(data[index] * gain, -1, 1);
+          const position = frame * speed;
+          const a = Math.min(Math.floor(position), to - from - 1);
+          const b = Math.min(a + 1, to - from - 1);
+          for (let ch = 0; ch < channels; ch++) {
+            let value = inputData[a * channels + ch] * (1 - (position % 1)) + inputData[b * channels + ch] * (position % 1);
+            if (project.cut.denoise) {
+              const high = 0.987 * (filtered[ch] + value - previous[ch]);
+              previous[ch] = value;
+              filtered[ch] = high;
+              value = Math.abs(high) < 0.012 ? high * 0.30 : high;
+            }
+            data[frame * channels + ch] = clamp(value * gain, -1, 1);
           }
         }
-        const segment = new AudioSample({ data, format: "f32", timestamp, numberOfChannels: sample.numberOfChannels, sampleRate: sample.sampleRate });
+        const segment = new AudioSample({ data, format: "f32", timestamp, numberOfChannels: channels, sampleRate: sample.sampleRate });
         try {
           await source.add(segment);
           writtenEnd = timestamp + segment.duration;
@@ -106,7 +124,7 @@ async function encodeAudio(track: InputAudioTrack, source: AudioSampleSource, pr
 }
 
 export async function renderClip(
-  media: Blob, project: Project, quality: 720 | 1080, signal: AbortSignal,
+  media: Blob, project: Project, quality: 180 | 360 | 720 | 1080, signal: AbortSignal,
   onProgress: (progress: number) => void, preferred: "auto" | "webm",
 ) {
   const input = inputFor(media);
@@ -143,18 +161,19 @@ export async function renderClip(
     if (audioSource) output.addAudioTrack(audioSource);
     await output.start();
     const activeOutput = output;
-    const cues = clipCues(project);
-    const total = lengthOf(project.cut.spans);
+    const speed = project.cut.speed ?? 1;
+    const cues = clipCues(project).map(cue => ({ ...cue, start: cue.start / speed, end: cue.end / speed }));
+    const total = lengthOf(project.cut.spans) / speed;
     const sink = new CanvasSink(videoTrack, { width: Math.min(1920, project.width), poolSize: 2 });
     const videoWork = async () => {
       let offset = 0;
       let frameIndex = 0;
       let lastReport = 0;
       for (const span of project.cut.spans) {
-        const nextOffset = offset + span.end - span.start;
+        const nextOffset = offset + (span.end - span.start) / speed;
         const startIndex = frameIndex;
         const stopIndex = Math.ceil(nextOffset * fps - 1e-5);
-        const times = Array.from({ length: stopIndex - startIndex }, (_, index) => span.start + Math.max(0, (startIndex + index) / fps - offset));
+        const times = Array.from({ length: stopIndex - startIndex }, (_, index) => span.start + Math.max(0, (startIndex + index) / fps - offset) * speed);
         for await (const frame of sink.canvasesAtTimestamps(times)) {
           throwIfStopped(internal.signal);
           const time = frameIndex / fps;

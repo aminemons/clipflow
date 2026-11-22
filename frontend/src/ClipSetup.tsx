@@ -1,3 +1,4 @@
+import { api } from "./apiClient";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   ArrowLeft,
@@ -289,14 +290,7 @@ export default function ClipSetup({
   }>();
   useEffect(() => {
     const controller = new AbortController();
-    fetch(`/api/projects/${project.id}/readiness`, {
-      signal: controller.signal,
-    })
-      .then(async (response) => {
-        if (!response.ok)
-          throw new Error("Could not check this source. Reload the project.");
-        return response.json();
-      })
+    api<NonNullable<typeof readiness>>(`/projects/${project.id}/readiness`, { signal: controller.signal })
       .then(setReadiness)
       .catch((error) => {
         if (error.name !== "AbortError") setError(error.message);

@@ -14,9 +14,10 @@ export function videoFrame(video: HTMLVideoElement): Frame {
   };
 }
 
-export function canvasSize(project: Project, quality: 360 | 720 | 1080) {
-  const ratio = destinationFor(project.destination).ratio;
+export function canvasSize(project: Project, quality: 180 | 360 | 720 | 1080) {
+  const ratio = project.cut.ratio ?? destinationFor(project.destination).ratio;
   if (ratio === "16:9") return { width: Math.round(quality * 16 / 18) * 2, height: quality };
+  if (ratio === "4:5") return { width: quality, height: Math.round(quality * 5 / 8) * 2 };
   if (ratio === "1:1") return { width: quality, height: quality };
   return { width: quality, height: Math.round(quality * 16 / 18) * 2 };
 }
@@ -143,7 +144,9 @@ function paintCaption(ctx: Surface, cue: SubtitleSegment, time: number, project:
   const u = Math.min(w, h);
   const baseSize = u * (style === "Bold" ? 0.069 : 0.059) * captionSize / 100;
   const limit = w * (1 - safe.safeRight - 0.10);
-  ctx.font = `${style === "Bold" ? 400 : 700} ${baseSize}px ${style === "Bold" ? strong : face}`;
+  const font = project.cut.captionFont === "noto-arabic" ? '"Noto Sans Arabic", sans-serif'
+    : project.cut.captionFont === "anton" || (!project.cut.captionFont && style === "Bold") ? strong : face;
+  ctx.font = `${font === strong ? 400 : 700} ${baseSize}px ${font}`;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
   const text = style === "Bold" ? cue.text.toLocaleUpperCase() : cue.text;
@@ -154,8 +157,8 @@ function paintCaption(ctx: Surface, cue: SubtitleSegment, time: number, project:
   const page = Math.floor(fraction * pageCount);
   const lines = textLines(ctx, words.slice(page * allowance, (page + 1) * allowance).join(" "), limit, 3);
   const lineHeight = baseSize * 1.19;
-  const x = w * (0.50 - (safe.safeRight - 0.08) / 2);
-  const y = h * (1 - safe.safeBottom) - (lines.length - 0.5) * lineHeight;
+  const x = w * (project.cut.captionX ?? (0.50 - (safe.safeRight - 0.08) / 2));
+  const y = h * (project.cut.captionY ?? (1 - safe.safeBottom)) - (lines.length - 0.5) * lineHeight;
   if (style === "Editorial") box(ctx, x - u * 0.035, y - baseSize * 0.78, u * 0.07, u * 0.009, 2, accent);
   for (const [index, line] of lines.entries()) {
     const row = y + index * lineHeight;
@@ -179,10 +182,26 @@ export function paint(ctx: Surface, frame: Frame, project: Project, time: number
   const graphics = source ? [] : cut.graphics.filter(item => time >= item.start && time < item.start + item.duration);
   const punch = graphics.find(item => item.style === "zoom");
   const animatedZoom = punch ? 1 + Math.sin(Math.PI * clamp((time - punch.start) / punch.duration, 0, 1)) * 0.22 : 1;
+  const outputSource = (() => {
+    let position = time * (cut.speed ?? 1);
+    for (const span of cut.spans) {
+      if (position < span.end - span.start) return span.start + position;
+      position -= span.end - span.start;
+    }
+    return cut.spans[cut.spans.length - 1]?.end ?? 0;
+  })();
+  const keys = cut.keyframes ?? [];
+  const index = keys.findIndex(key => key.time >= outputSource);
+  const from = index > 0 ? keys[index - 1] : index < 0 ? keys[keys.length - 1] : keys[index];
+  const to = index >= 0 ? keys[index] : from;
+  const mix = from && to && to.time > from.time ? clamp((outputSource - from.time) / (to.time - from.time), 0, 1) : 0;
+  const focus = from && to ? from.x + (to.x - from.x) * mix : cut.focus / 100;
+  const focusY = from && to ? from.y + (to.y - from.y) * mix : 0.5;
+  const zoom = from && to ? from.zoom + (to.zoom - from.zoom) * mix : cut.zoom / 100;
   const place = (scale: number, focus: number) => {
     const dw = frame.width * scale;
     const dh = frame.height * scale;
-    frame.draw(ctx, dw > w ? (w - dw) * focus : (w - dw) / 2, (h - dh) / 2, dw, dh);
+    frame.draw(ctx, dw > w ? (w - dw) * focus : (w - dw) / 2, (h - dh) * (dh > h && !source ? focusY : 0.5), dw, dh);
   };
   ctx.save();
   ctx.fillStyle = "#171f19";
@@ -191,10 +210,10 @@ export function paint(ctx: Surface, frame: Frame, project: Project, time: number
   const fit = Math.min(w / frame.width, h / frame.height);
   if (!source && cut.frame === "blur") {
     ctx.filter = `blur(${Math.min(w, h) * 0.035}px) brightness(0.57)`;
-    place(fill * 1.14, cut.focus / 100);
+    place(fill * 1.14, focus);
     ctx.filter = "none";
   }
-  place(source ? fit : (cut.frame === "fill" ? fill : fit) * cut.zoom / 100 * animatedZoom, source ? 0.5 : cut.focus / 100);
+  place(source ? fit : (cut.frame === "fill" ? fill : fit) * zoom * animatedZoom, source ? 0.5 : focus);
   for (const graphic of graphics) {
     if (graphic.style !== "zoom") paintGraphic(ctx, graphic, time, project, w, h, cutDuration);
   }
@@ -214,6 +233,6 @@ export function paint(ctx: Surface, frame: Frame, project: Project, time: number
 
 export async function loadStudioFonts() {
   if (typeof document !== "undefined") {
-    await Promise.allSettled(['700 24px "Outfit"', '24px "Anton"', '24px "Noto Studio Arabic"'].map(font => document.fonts.load(font)));
+    await Promise.allSettled(['700 24px "Outfit"', '24px "Anton"', '24px "Noto Studio Arabic"', '24px "Noto Sans Arabic"'].map(font => document.fonts.load(font)));
   }
 }

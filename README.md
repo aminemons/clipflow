@@ -4,23 +4,24 @@ Turn long horizontal videos into vertical clips, then review, edit, caption, and
 
 Clipflow was built for a full-stack developer assessment. The core workflow uses free, open-source tools and runs locally without an account or paid API key. A hosted workspace and optional external providers are also available.
 
-## Local-first Clipflow Studio
+## Clipflow in the browser
 
-Clipflow Studio opens without a Clipflow account. Import a video, choose a goal and destination, then make a first cut or review suggested moments. Trim and reorder source ranges, correct timed dialogue, style the frame, add motion graphics, review, and export. The browser stores footage and edits in IndexedDB. **Save project backup** downloads both together as a portable `.clipflow` file.
+[Open Clipflow](https://clipflow-aminemons.vercel.app). The Projects, Editor, Exports, Publish, and Settings workspace opens without a Clipflow account. Footage and edits are saved by that browser on the current device. Use a recent Chromium browser for local video rendering.
 
-- Hosted editor — [clipflow-local-studio.vercel.app](https://clipflow-local-studio.vercel.app)
-- Desktop — [Windows build and ChatGPT plan connection](studio-desktop/README.md)
-- Optional AI — use your developer API key for automatic timed transcription and GPT editing. The desktop app also supports eligible ChatGPT Plus or Pro plan usage for GPT editing. Keyed web requests use a same-origin relay that does not persist the key, audio or dialogue.
-- Local export uses native WebCodecs. It writes H.264/AAC MP4 when the browser supports the encoders and VP9/Opus WebM otherwise. The hosted editor can be installed as a PWA and used offline after its first complete load.
-- Open `/studio.html` in the Vite development server for the editor. For the OpenAI relay, run Vercel Dev from the configured frontend root or use the hosted editor.
+- The browser workspace handles local file import, automatic cuts, timeline trimming, caption editing, camera and sound settings, motion graphics, rendered previews, batch downloads, and Adobe handoff.
+- Set an OpenAI developer key under **Settings → Processing & providers** for transcript-based GPT suggestions and timed transcription. The key is held for the current session.
+- Open [the full cloud workspace](https://clipflow-aminemons.vercel.app/index.html) for existing cloud projects, YouTube import, connected publishing, and the complete processing-provider options. Alternatively, use the original full Windows desktop distribution from [GitHub Releases](https://github.com/aminemons/clipflow/releases).
+- The optional [ChatGPT desktop build](studio-desktop/README.md) opens the same local workspace and can use eligible ChatGPT plans for GPT highlight selection.
 
-The Studio browser app works with one local source per project and can assemble multiple ranges from that source. The assessment build below still provides the original cloud workspace, YouTube import, subject tracking, multi-clip exports and Adobe handoff.
+The browser export uses WebCodecs. It writes H.264/AAC MP4 when supported by the browser and VP9/Opus WebM otherwise. It can be installed from the browser and reopened offline after saving the editor assets.
+
+Open `/browser.html` in the Vite development server to test the browser workspace, or `/index.html` with the local API worker for the full version.
 
 The sample uses [Fog covering mountain time lapse](https://commons.wikimedia.org/wiki/File:Fog_covering_mountain_time_lapse.webm) by Athulvis under [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/). The resized, color-adjusted edit with added demo narration is distributed under the same license. Mediabunny is distributed under the [MPL 2.0](https://github.com/Vanilagy/mediabunny/blob/main/LICENSE).
 
 ## Try the original hosted assessment
 
-Open **[Clipflow](https://clipflow-aminemons.vercel.app)** and sign in with the assessment account:
+Open **[the full cloud workspace](https://clipflow-aminemons.vercel.app/index.html)** and sign in with the assessment account:
 
 ```text
 Email:    boubasala2009@gmail.com

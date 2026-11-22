@@ -8,6 +8,6 @@ export default defineConfig({
     proxy: { '/api': 'http://localhost:8767' }
   },
   build: {
-    rollupOptions: { input: { legacy: 'index.html', studio: 'studio.html' } },
+    rollupOptions: { input: { legacy: 'index.html', browser: 'browser.html', studio: 'studio.html' } },
   },
 })

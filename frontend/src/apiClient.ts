@@ -1,3 +1,5 @@
+import { browserWorkspace } from "./browser/mode";
+
 const API_ROOT = "/api";
 
 export const AUTH_EXPIRED_EVENT = "clipflow-auth-expired";
@@ -40,6 +42,10 @@ function errorDetail(body: string): ErrorDetail {
 }
 
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
+  if (browserWorkspace) {
+    const { browserApi } = await import("./browser/api");
+    return browserApi<T>(path, init);
+  }
   const response = await fetch(`${API_ROOT}${path}`, {
     ...init,
     headers: {

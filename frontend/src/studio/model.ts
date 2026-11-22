@@ -29,6 +29,10 @@ export type Cut = {
   spans: Span[]; graphics: Graphic[]; captions: boolean; captionStyle: (typeof captionStyles)[number];
   captionSize: number; accent: string; frame: "fill" | "fit" | "blur"; focus: number; zoom: number;
   volume: number; fade: boolean;
+  ratio?: "9:16" | "4:5" | "1:1" | "16:9";
+  captionX?: number; captionY?: number; captionFont?: "outfit" | "anton" | "noto-arabic";
+  speed?: number; fadeSeconds?: number; denoise?: boolean;
+  keyframes?: { time: number; x: number; y: number; zoom: number }[];
 };
 export type Project = {
   id: string; title: string; sourceName: string; sourceType: string; duration: number; width: number; height: number;

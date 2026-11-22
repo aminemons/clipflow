@@ -22,7 +22,7 @@ export default async function handler(req, res) {
       return res.status(200).json({ text });
     }
     if (req.body?.task === "transcribe" && typeof req.body.audio === "string" && req.body.audio.length < 2_150_000 && /^UklGR[A-Za-z0-9+/=]+$/.test(req.body.audio)) {
-      const segments = await transcribeWave(key, Buffer.from(req.body.audio, "base64"), signal);
+      const segments = await transcribeWave(key, Buffer.from(req.body.audio, "base64"), signal, req.body.hints);
       return res.status(200).json({ segments });
     }
     return res.status(400).json({ error: "This edit request is invalid or too large." });

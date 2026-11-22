@@ -1,3 +1,5 @@
+import { browserWorkspace, cloudWorkspace } from "./browser/mode";
+import type { StudioSession } from "./studio/assistant";
 import { useEffect, useState } from "react";
 import { X } from "lucide-react";
 import type {
@@ -38,6 +40,27 @@ export default function ProviderSettings({
   });
   const [clearKeys, setClearKeys] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
+  const desktop = browserWorkspace ? window.clipflowDesktop : undefined;
+  const [session, setSession] = useState<StudioSession>();
+  const [connecting, setConnecting] = useState(false);
+  useEffect(() => {
+    if (open && desktop) void desktop.session().then(setSession).catch(() => undefined);
+  }, [desktop, open]);
+  async function connect() {
+    if (!desktop) return;
+    setConnecting(true);
+    setError("");
+    try {
+      if (session?.sharing) await desktop.disconnect();
+      else await desktop.signIn();
+      setSession(await desktop.session());
+      onHealth(await api<Health>("/health"));
+    } catch (error) {
+      setError(error instanceof Error ? error.message.replace(/^Error invoking remote method '[^']+': Error: /, "") : "Could not connect ChatGPT.");
+    } finally {
+      setConnecting(false);
+    }
+  }
   const [error, setError] = useState("");
   useEffect(() => {
     if (!open) return;
@@ -128,6 +151,19 @@ export default function ProviderSettings({
             </button>
           )}
         </div>
+        {browserWorkspace && <div className="settings-cloud-note">
+          <p>Source files and edits are stored on this device. OpenAI API keys are kept for this session. Local Whisper, YouTube import, external providers and direct publishing are available in the full workspace.</p>
+          {!desktop && <a href={cloudWorkspace} target="_blank" rel="noreferrer">Open full cloud workspace</a>}
+        </div>}
+        {desktop && <div className="settings-cloud-note">
+          <strong>ChatGPT plan</strong>
+          {session?.sharing && <p>{session.identity?.email || "Connected"} · ChatGPT plan usage enabled. Select OpenAI as the highlight provider.</p>}
+          <div className="publish-inline-actions">
+            <button className="secondary-action" disabled={connecting} onClick={() => void connect()}>{connecting ? "Connecting…" : session?.sharing ? "Disconnect ChatGPT" : "Continue with ChatGPT"}</button>
+            {connecting && <button className="secondary-action" onClick={() => void desktop.cancelSignIn()}>Cancel</button>}
+            {session?.sharing && <button className="secondary-action" onClick={() => void desktop.usage()}>Manage usage</button>}
+          </div>
+        </div>}
         <label className="settings-field">
           Transcription provider
           <select
@@ -135,12 +171,13 @@ export default function ProviderSettings({
             onChange={(event) =>
               setForm({
                 ...form,
-                transcription_provider: event.target.value as "local" | "groq",
+                transcription_provider: event.target.value as ProviderSettingsType["transcription_provider"],
               })
             }
           >
             <option value="local">Local Whisper</option>
             <option value="groq">Groq</option>
+            {browserWorkspace && <option value="openai">OpenAI timed transcription</option>}
           </select>
         </label>
         <label className="settings-field">
