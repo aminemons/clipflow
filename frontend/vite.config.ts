@@ -6,5 +6,8 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: { '/api': 'http://localhost:8767' }
-  }
+  },
+  build: {
+    rollupOptions: { input: { legacy: 'index.html', studio: 'studio.html' } },
+  },
 })

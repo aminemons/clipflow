@@ -1,0 +1,1 @@
+{"name":"clipflow-studio-desktop-tools","version":"1.0.0","private":true,"type":"module","scripts":{"prepare-app":"node prepare.mjs","start":"electron .build/app","package:win":"electron-packager .build/app Clipflow --platform=win32 --arch=x64 --out=.build/release --overwrite --asar --prune=false"},"devDependencies":{"@electron/packager":"20.3.0","electron":"45.4.1"}}
