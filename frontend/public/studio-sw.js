@@ -1,4 +1,4 @@
-const version = "clipflow-studio-v1";
+const version = "clipflow-studio-v2";
 const shell = ["/studio.html", "/studio.webmanifest", "/studio/icon.svg", "/studio/icon-192.png", "/studio/icon-512.png", "/studio/sample.webp", "/studio/sample.mp4", "/fonts/Outfit.ttf", "/fonts/Anton.ttf", "/fonts/NotoSansArabic.ttf"];
 self.addEventListener("install", event => {
   event.waitUntil((async () => {
@@ -27,11 +27,12 @@ self.addEventListener("fetch", event => {
   const url = new URL(event.request.url);
   if (url.origin !== self.location.origin || event.request.method !== "GET") return;
   if (event.request.mode === "navigate" && ["/", "/studio.html"].includes(url.pathname)) {
-    event.respondWith(fetch(event.request).catch(() => caches.match("/studio.html")));
+    event.respondWith(fetch(event.request).catch(() => caches.match("/studio.html", { ignoreVary: true })));
   } else if (!event.request.headers.has("range") && (shell.includes(url.pathname) || url.pathname.startsWith("/assets/"))) {
     event.respondWith((async () => {
       const cache = await caches.open(version);
-      const existing = await cache.match(event.request);
+      // Precached fetches and module/font requests can differ in their Origin header.
+      const existing = await cache.match(event.request, { ignoreVary: true });
       if (existing) return existing;
       const response = await fetch(event.request);
       if (response.ok) await cache.put(event.request, response.clone());

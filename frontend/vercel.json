@@ -3,8 +3,8 @@
   "installCommand": "npm ci",
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
-  "rewrites": [
-    { "source": "/", "destination": "/studio.html" }
+  "redirects": [
+    { "source": "/", "destination": "/studio.html", "permanent": false }
   ],
   "headers": [
     {
