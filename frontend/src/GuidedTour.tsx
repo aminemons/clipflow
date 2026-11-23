@@ -17,6 +17,7 @@ export type GuidedTourProps = {
   hasProject: boolean;
   hasClips?: boolean;
   onClose?: () => void;
+  showWelcome?: boolean;
   replayToken: number;
 };
 type TourStep = {
@@ -301,10 +302,11 @@ export default function GuidedTour({
   hasProject,
   hasClips = false,
   onClose,
+  showWelcome = true,
   replayToken,
 }: GuidedTourProps) {
   const [mode, setMode] = useState<"welcome" | "tour" | "closed">(() =>
-    readState() ? "closed" : "welcome",
+    !showWelcome || readState() ? "closed" : "welcome",
   );
   const [stepIndex, setStepIndex] = useState(0);
   const [geometry, setGeometry] = useState<Geometry | null>(null);

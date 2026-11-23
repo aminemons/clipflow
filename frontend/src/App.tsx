@@ -46,6 +46,7 @@ import ProjectsPage, { type ProjectChanges } from "./ProjectsPage";
 import ExportsPage from "./ExportsPage";
 import SettingsPage from "./SettingsPage";
 import GuidedTour, { type TourPage } from "./GuidedTour";
+import GuidedEdit from "./GuidedEdit";
 import CaptionPresets from "./CaptionPresets";
 import { insertPrompts, motionGraphics, type MotionGraphic } from "./editRecipes";
 import ClipLibrary from "./ClipLibrary";
@@ -102,8 +103,12 @@ const historyKey = (projectId: string) => `clipflow-edit-history-${projectId}`;
 const clipFingerprint = (items: Clip[]) =>
   items.map((clip) => `${clip.id}:${clip.revision || 0}`).join("|");
 
-function routePage(): TourPage {
+type WorkspacePage = TourPage | "guide";
+const projectPages: WorkspacePage[] = ["editor", "guide"];
+
+function routePage(): WorkspacePage {
   const value = window.location.hash.split("/")[1];
+  if (browserWorkspace && (!value || value === "guide")) return "guide";
   return ["projects", "editor", "exports", "publish", "settings"].includes(
     value,
   )
@@ -112,7 +117,10 @@ function routePage(): TourPage {
 }
 export default function App() {
   const { hosted } = useHostedAuth();
-  const [page, setPage] = useState<TourPage>(routePage);
+  const [page, setPage] = useState<WorkspacePage>(routePage);
+  const guided = page === "guide";
+  const [freshGuide, setFreshGuide] = useState(false);
+  const [guideReset, setGuideReset] = useState(0);
   const [settingsSection, setSettingsSection] = useState("processing");
   const [navCompact, setNavCompact] = useState(false);
   const [tourSetupStep, setTourSetupStep] = useState<
@@ -208,8 +216,9 @@ export default function App() {
   useEffect(() => {
     if (resumed.current || !projects.length) return;
     resumed.current = true;
-    const last = window.location.hash.startsWith("#/editor/")
-      ? window.location.hash.split("/")[2]
+    const linked = window.location.hash.split("/");
+    const last = projectPages.includes(linked[1] as WorkspacePage) && linked[2]
+      ? linked[2]
       : localStorage.getItem("clipflow-current-project");
     if (last && projects.some((item) => item.id === last && !item.archived))
       void openProject(last, false);
@@ -328,17 +337,22 @@ export default function App() {
           next.id === proofJobId.current
         ) {
           setProofUrl(next.download_url.startsWith("blob:") ? next.download_url : next.download_url + "?v=" + next.id);
-          setNotice("Rendered proof ready. Play to review the final clip.");
+          if (browserWorkspace && project?.id === next.project_id) {
+            const updated = await api<Project>(`/projects/${next.project_id}`);
+            setClips(updated.clips);
+          }
+          if (!guided) setNotice("Rendered proof ready. Play to review the final clip.");
         }
         if (
           next.status === "done" &&
           next.download_url &&
           next.project_id &&
-          next.id !== proofJobId.current
+          next.id !== proofJobId.current &&
+          next.kind !== "preview_job"
         ) {
           const updated = await api<Project>(`/projects/${next.project_id}`);
           if (project?.id === next.project_id) setClips(updated.clips);
-          setNotice("Export complete. Your download is ready.");
+          if (!guided) setNotice("Export complete. Your download is ready.");
         }
         if (
           next.status === "done" &&
@@ -377,8 +391,10 @@ export default function App() {
             setTimelineZoom(1);
             setSidebar("clips");
             setUrl("");
-            setPage("editor");
-            window.history.pushState(null, "", `#/editor/${loaded.id}`);
+            const target = browserWorkspace ? "guide" : "editor";
+            setFreshGuide(false);
+            setPage(target);
+            window.history.pushState(null, "", `#/${target}/${loaded.id}`);
           }
           setProject(loaded);
           setClips(nextClips);
@@ -423,12 +439,12 @@ export default function App() {
           refreshProjects();
           setNotice(
             next.kind === "auto_edit_job"
-              ? "Your rendered cut is ready to watch."
+              ? guided ? "" : "Your rendered cut is ready to watch."
               : next.kind === "generate_clips_job"
               ? "Clips generated. Select a clip to adjust its timing, camera or captions."
               : next.kind === "transcribe_job"
                 ? "Transcription complete."
-                : "Source imported. Choose a style to make your first cut.",
+                : browserWorkspace ? "" : "Source imported. Choose a style to make your first cut.",
           );
           setHistory([]);
           setFuture([]);
@@ -460,7 +476,7 @@ export default function App() {
       }
     }, 900);
     return () => window.clearInterval(timer);
-  }, [job, project?.id, refreshProjects]);
+  }, [job, project?.id, refreshProjects, guided]);
   useEffect(() => {
     localStorage.setItem(
       "clipflow-exports",
@@ -537,7 +553,7 @@ export default function App() {
     setImportSubmitting(true);
     setError("");
     try {
-      if (!(await flushQueuedSaves())) return;
+      if (!(await flushQueuedSaves(guided))) return;
       const next = await create();
       importJobId.current = next.id;
       loadProjectOnDone.current = true;
@@ -581,7 +597,7 @@ export default function App() {
     proofJobId.current = "";
     setRestoreAvailable(false);
     try {
-      if (!(await flushQueuedSaves())) return;
+      if (!(await flushQueuedSaves(guided))) return;
       let loaded = await api<Project>(`/projects/${id}`);
       if (requestId !== openRequestId.current) return;
       let active: Job | undefined;
@@ -603,8 +619,10 @@ export default function App() {
       setShowSetup(!loaded.clips?.length);
       setAutoEditOpen(Boolean(loaded.auto_edit) || !loaded.clips?.length);
       if (reveal) {
-        setPage("editor");
-        window.history.pushState(null, "", `#/editor/${loaded.id}`);
+        const target = browserWorkspace ? "guide" : "editor";
+        setFreshGuide(false);
+        setPage(target);
+        window.history.pushState(null, "", `#/${target}/${loaded.id}`);
       }
       setClips(loaded.clips || []);
       setRestoreAvailable(Boolean(loaded.can_restore_clips));
@@ -882,7 +900,10 @@ export default function App() {
     proofJobId.current = "";
     setProofUrl("");
     snapshot();
-    setClips((list) => list.map((c) => (c.id === id ? { ...c, ...patch } : c)));
+    setClips(list => list.map(c => c.id === id ? {
+      ...c, ...patch,
+      ...(browserWorkspace ? { browser_proof_url: undefined, download_url: undefined, download_name: undefined } : {}),
+    } : c));
     if (!project) return;
     const version = (patchVersions.current[id] || 0) + 1;
     patchVersions.current[id] = version;
@@ -1065,16 +1086,16 @@ export default function App() {
       setAnalysisSubmitting(false);
     }
   }
-  async function makeAutoEdit(brief: EditBrief) {
+  async function makeAutoEdit(brief: EditBrief, draftOnly = false) {
     if (!project || isBusy || analysisSubmitting) return;
     setAnalysisSubmitting(true);
     setError("");
     setNotice("");
     try {
-      if (!(await flushQueuedSaves())) return;
+      if (!(await flushQueuedSaves(guided))) return;
       const next = await api<Job>(`/projects/${project.id}/auto-edit`, {
         method: "POST",
-        body: JSON.stringify(brief),
+        body: JSON.stringify(draftOnly ? { ...brief, render_preview: false } : brief),
       });
       loadProjectOnDone.current = true;
       await startJob(next);
@@ -1096,7 +1117,7 @@ export default function App() {
   ) {
     if (!project || isBusy || health.transcription === false) return;
     try {
-      if (!(await flushQueuedSaves())) return;
+      if (!(await flushQueuedSaves(guided))) return;
       loadProjectOnDone.current = true;
       await startJob(
         await api<Job>(`/projects/${project.id}/transcribe`, {
@@ -1118,26 +1139,30 @@ export default function App() {
       setError(e instanceof Error ? e.message : "Transcription failed.");
     }
   }
-  async function renderProof(saveDrafts = false) {
-    if (!project || !selected || isBusy) return;
+  async function renderProof(saveDrafts = false, clipId = selected?.id) {
+    if (!project || !clipId || isBusy || analysisSubmitting) return;
+    setAnalysisSubmitting(true);
     try {
       if (!(await flushQueuedSaves(saveDrafts))) return;
       loadProjectOnDone.current = false;
       const proof = await api<Job>(`/projects/${project.id}/preview`, {
         method: "POST",
-        body: JSON.stringify({ clip_id: selected.id }),
+        body: JSON.stringify({ clip_id: clipId }),
       });
       proofJobId.current = proof.id;
       await startJob(proof);
-      setNotice("Rendering the saved clip for review");
+      if (!guided) setNotice("Rendering the saved clip for review");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Preview render failed.");
+    } finally {
+      setAnalysisSubmitting(false);
     }
   }
   async function exportClips(ids: string[]) {
-    if (!project || !ids.length || isBusy) return;
+    if (!project || !ids.length || isBusy || analysisSubmitting) return;
+    setAnalysisSubmitting(true);
     try {
-      if (!(await flushQueuedSaves())) return;
+      if (!(await flushQueuedSaves(guided))) return;
       const created = await api<Job>(`/projects/${project.id}/export`, {
         method: "POST",
         body: JSON.stringify({ clip_ids: ids }),
@@ -1145,9 +1170,11 @@ export default function App() {
       setExports((x) => [created, ...x]);
       setJob(created);
       setSidebar("clips");
-      setNotice("Export queued");
+      if (!guided) setNotice("Export queued");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Export failed.");
+    } finally {
+      setAnalysisSubmitting(false);
     }
   }
   async function cancelJob(id: string) {
@@ -1219,8 +1246,8 @@ export default function App() {
     }
   }
 
-  async function navigatePage(next: TourPage) {
-    if (!(await flushQueuedSaves())) return;
+  async function navigatePage(next: WorkspacePage) {
+    if (!(await flushQueuedSaves(guided))) return;
     if (next !== "editor") {
       videoRef.current?.pause();
       setExpandedPreview(false);
@@ -1229,18 +1256,18 @@ export default function App() {
     window.history.pushState(
       null,
       "",
-      `#/${next}${next === "editor" && project ? "/" + project.id : ""}`,
+      `#/${next}${projectPages.includes(next) && project ? "/" + project.id : ""}`,
     );
     if (next === "projects") void refreshProjects();
     if (next === "exports") void refreshJobs();
   }
   useEffect(() => {
     const changed = async () => {
-      if (!(await flushQueuedSaves())) {
+      if (!(await flushQueuedSaves(guided))) {
         window.history.replaceState(
           null,
           "",
-          `#/${page}${page === "editor" && project ? "/" + project.id : ""}`,
+          `#/${page}${projectPages.includes(page) && project ? "/" + project.id : ""}`,
         );
         return;
       }
@@ -1251,7 +1278,7 @@ export default function App() {
       }
       setPage(next);
       const id = window.location.hash.split("/")[2];
-      if (next === "editor" && id && id !== project?.id)
+      if (projectPages.includes(next) && id && id !== project?.id)
         void openProject(id, false);
     };
     window.addEventListener("hashchange", changed);
@@ -1353,7 +1380,7 @@ export default function App() {
     }
   }
   async function applySubtitles() {
-    if (!project || !subtitleDraft || !(await flushQueuedSaves())) return;
+    if (!project || !subtitleDraft || !(await flushQueuedSaves(guided))) return;
     try {
       const updated = await api<Project>(
         `/projects/${project.id}/transcript/import`,
@@ -1372,6 +1399,54 @@ export default function App() {
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not save subtitles.");
     }
+  }
+
+  useEffect(() => {
+    if (!guided || saveState !== "dirty") return;
+    const timer = window.setTimeout(() => void flushQueuedSaves(true), 450);
+    return () => window.clearTimeout(timer);
+  }, [guided, saveState, clips]);
+
+  function startNew() {
+    setError("");
+    if (!browserWorkspace) {
+      setNewProjectOpen(true);
+      return;
+    }
+    setFreshGuide(true);
+    setGuideReset(value => value + 1);
+    void navigatePage("guide");
+  }
+
+  function chooseGuideClip(clip: Clip) {
+    proofJobId.current = "";
+    setProofUrl("");
+    setSelectedId(clip.id);
+  }
+
+  async function addGuideRange(start: number, end: number, format: EditBrief["format"]) {
+    if (!project || isBusy || !(await flushQueuedSaves(true))) return false;
+    try {
+      const created = await api<Clip>(`/projects/${project.id}/clips`, {
+        method: "POST",
+        body: JSON.stringify({ ...DEFAULT_CLIP, title: `Clip ${clips.length + 1}`, start, end, aspect_ratio: format, selected: true }),
+      });
+      setClips(current => [...current, created]);
+      chooseGuideClip(created);
+      return true;
+    } catch (error) {
+      setError(error instanceof Error ? error.message : "Could not add this section.");
+      return false;
+    }
+  }
+
+  async function openAdvanced(clip?: Clip) {
+    if (!(await flushQueuedSaves(true))) return;
+    setAutoEditOpen(false);
+    setShowSetup(!clips.length);
+    setWorkspaceMode("edit");
+    if (clip) await workOnClip(clip);
+    await navigatePage("editor");
   }
 
   const finishIndex = finishSteps.findIndex(([tab]) => tab === inspector);
@@ -1393,10 +1468,7 @@ export default function App() {
       <WorkspaceNav
         page={page}
         onNavigate={navigatePage}
-        onNew={() => {
-          setError("");
-          setNewProjectOpen(true);
-        }}
+        onNew={startNew}
         onTour={() => setTourReplay((n) => n + 1)}
         hasProject={!!project}
         projectTitle={project?.title}
@@ -1407,6 +1479,31 @@ export default function App() {
         }
       />
       <div className="workspace-route">
+        {guided && <GuidedEdit
+          key={`${project?.id ?? "new"}:${guideReset}`}
+          project={project}
+          clips={clips}
+          selected={selected?.suggestion_status === "discarded" ? clips.find(clip => clip.suggestion_status !== "discarded") : selected}
+          fresh={freshGuide}
+          busy={isBusy || importSubmitting || analysisSubmitting}
+          job={job}
+          canTranscribe={health.transcription === true}
+          onUpload={importFile}
+          onSubtitles={importSubtitles}
+          onDemo={loadDemo}
+          onProjects={() => void navigatePage("projects")}
+          onSettings={() => { setSettingsSection("processing"); void navigatePage("settings"); }}
+          onFind={brief => void makeAutoEdit(brief, true)}
+          onAddRange={addGuideRange}
+          onSelect={chooseGuideClip}
+          onChange={patchClip}
+          onTranscribe={() => void transcribe()}
+          onRender={id => void renderProof(true, id)}
+          onExport={id => void exportClips([id])}
+          onCaptions={id => void downloadSrt(id)}
+          onAdvanced={clip => void openAdvanced(clip)}
+          onCancel={id => void cancelJob(id)}
+        />}
         {page === "projects" && (
           <ProjectsPage
             projects={projects.map((p) =>
@@ -1415,10 +1512,7 @@ export default function App() {
             jobs={jobs}
             currentId={project?.id}
             onOpen={openProject}
-            onNew={() => {
-              setError("");
-              setNewProjectOpen(true);
-            }}
+            onNew={startNew}
             onDemo={loadDemo}
             onUpdate={updateProject}
             onDelete={deleteProject}
@@ -2588,7 +2682,8 @@ export default function App() {
         </div>
       </div>
       <GuidedTour
-        page={page}
+        page={guided ? "projects" : page}
+        showWelcome={!browserWorkspace}
         onNavigate={navigatePage}
         onReveal={(target) => {
           setAutoEditOpen(false);
@@ -2645,7 +2740,7 @@ export default function App() {
           </section>
         </div>
       )}
-      {(job?.status === "queued" || job?.status === "running") && (
+      {!guided && (job?.status === "queued" || job?.status === "running") && (
         <div className="job-toast">
           <LoaderCircle className="spin" size={16} />
           <div>

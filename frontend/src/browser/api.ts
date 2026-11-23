@@ -281,14 +281,32 @@ async function startProjectJob(id: string, operation: Operation, data: unknown) 
       return;
     }
     if (operation === "preview") {
-      return (await render(project, findClip(project, (data as { clip_id: string }).clip_id), "proof", context)).id;
+      const clip = findClip(project, (data as { clip_id: string }).clip_id);
+      const artifact = await render(project, clip, "proof", context);
+      context.signal.throwIfAborted();
+      await editProject(id, current => {
+        const saved = current.clips.find(item => item.id === clip.id && item.revision === clip.revision);
+        if (saved) saved.auto_proof = { job_id: context.id, revision: clip.revision || 1 };
+      });
+      return artifact.id;
     }
     if (operation === "export") {
       const ids = [...new Set((data as { clip_ids: string[] }).clip_ids)];
       if (!ids.length) return fail("Choose clips to export.");
       const clips = ids.map(id => findClip(project, id));
       const artifacts: Artifact[] = [];
-      for (const [index, clip] of clips.entries()) artifacts.push(await render(project, clip, "export", context, index, clips.length));
+      for (const [index, clip] of clips.entries()) {
+        const proof = clip.auto_proof?.revision === (clip.revision || 1)
+          ? await read<Artifact>("artifacts", clip.auto_proof.job_id + ":" + clip.id) : undefined;
+        if (proof?.kind === "proof" && proof.project === id && proof.clip === clip.id) {
+          context.signal.throwIfAborted();
+          const final: Artifact = { ...proof, id: context.id + ":" + clip.id, kind: "export" };
+          await put("artifacts", final.id, final);
+          artifacts.push(final);
+        } else {
+          artifacts.push(await render(project, clip, "export", context, index, clips.length));
+        }
+      }
       context.signal.throwIfAborted();
       let artifactId = artifacts[0].id;
       if (artifacts.length > 1) {
@@ -319,7 +337,8 @@ async function startProjectJob(id: string, operation: Operation, data: unknown) 
       await editProject(id, current => { current.clips.push(...clips); current.generation_settings = options; });
       return;
     }
-    const brief = data as EditBrief;
+    const { render_preview: preview = true, ...brief } = data as EditBrief & { render_preview?: boolean };
+    if (!preview) await context.report("Finding moments", 5);
     let warning: string | undefined;
     if (brief.style !== "visual" && !project.transcript?.length && auth.key) {
       try { project.transcript = await transcribe(project, {}, context); } catch (e) {
@@ -331,7 +350,7 @@ async function startProjectJob(id: string, operation: Operation, data: unknown) 
     const ranges = await moments(project, { mode:"smart", max_clips:brief.count, use_transcript:brief.style !== "visual",
       topic:brief.focus, target_duration:brief.style === "social" ? 22 : 30, ranges:[], provider: (auth.key || auth.plan) && settings.highlight_provider === "openai" ? "openai" : "local" }, auth, context.signal, label => { void context.report(label); });
     const clips = ranges.map((range, index) => automaticClip(project, range, brief, context.id, index));
-    for (const [index, clip] of clips.entries()) {
+    for (const [index, clip] of (preview ? clips : []).entries()) {
       await render(project, clip, "proof", context, index, clips.length);
       clip.auto_proof = { job_id: context.id, revision: clip.revision || 1 };
     }

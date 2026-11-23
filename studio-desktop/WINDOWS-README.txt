@@ -4,7 +4,9 @@ Extract the complete ZIP. Open the Clipflow folder and run Clipflow.exe.
 Keep the executable and all of its accompanying files together.
 This portable build is unsigned.
 
-Projects and footage are saved on this PC in the app's local data folder.
+Make a clip guides you from source footage to a downloadable video.
+Choose Advanced editor for timeline controls. Projects and footage are
+saved on this PC in the app's local data folder.
 Use Export > Save project backup to create a portable .clipflow file.
 
 For GPT editing, open Settings > Processing & providers and select

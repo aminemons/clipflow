@@ -8,6 +8,7 @@ import {
   HelpCircle,
   Plus,
   Settings2,
+  Scissors,
   Send,
   PanelLeftClose,
   PanelLeftOpen,
@@ -27,8 +28,8 @@ export default function WorkspaceNav({
   onCompact,
   activeJobs,
 }: {
-  page: TourPage;
-  onNavigate: (page: TourPage) => void;
+  page: TourPage | "guide";
+  onNavigate: (page: TourPage | "guide") => void;
   onNew: () => void;
   onTour: () => void;
   hasProject: boolean;
@@ -48,13 +49,13 @@ export default function WorkspaceNav({
   }, []);
   return (
     <aside
-      className={`workspace-nav ${compact ? "nav-compact" : ""}`}
+      className={`workspace-nav${browserWorkspace ? " nav-with-guide" : ""}${compact ? " nav-compact" : ""}`}
       aria-label="Main navigation"
     >
       <button
         className="workspace-brand"
-        onClick={() => onNavigate("projects")}
-        aria-label="Clipflow projects"
+        onClick={() => onNavigate(browserWorkspace ? "guide" : "projects")}
+        aria-label="Clipflow home"
       >
         <span>
           <Clapperboard size={21} />
@@ -68,6 +69,7 @@ export default function WorkspaceNav({
       <nav>
         {(
           [
+            ...(browserWorkspace ? [{ id: "guide", label: "Make a clip", icon: Scissors }] as const : []),
             { id: "projects", label: "Projects", icon: FolderOpen },
             { id: "editor", label: "Editor", icon: Clapperboard },
             { id: "exports", label: "Exports", icon: Download },

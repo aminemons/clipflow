@@ -1222,6 +1222,9 @@
     gap: 0;
     height: 62px;
   }
+  .workspace-nav.nav-with-guide nav {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
   .workspace-nav nav button {
     border-radius: 0;
     flex-direction: column;

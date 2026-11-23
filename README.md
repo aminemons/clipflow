@@ -6,7 +6,7 @@ Clipflow was built for a full-stack developer assessment. The core workflow uses
 
 ## Clipflow in the browser
 
-[Open Clipflow](https://clipflow-aminemons.vercel.app). The Projects, Editor, Exports, Publish, and Settings workspace opens without a Clipflow account. Footage and edits are saved by that browser on the current device. Use a recent Chromium browser for local video rendering.
+[Open Clipflow](https://clipflow-aminemons.vercel.app). Make a clip opens without an account and guides you through adding footage, picking a moment, styling the clip, watching the rendered result, and downloading it. Footage and edits are saved by that browser on the current device. Open Advanced editor on any project when you want the timeline and full controls. Use a recent Chromium browser for local video rendering.
 
 - The browser workspace handles local file import, automatic cuts, timeline trimming, caption editing, camera and sound settings, motion graphics, rendered previews, batch downloads, and Adobe handoff.
 - Set an OpenAI developer key under **Settings → Processing & providers** for transcript-based GPT suggestions and timed transcription. The key is held for the current session.

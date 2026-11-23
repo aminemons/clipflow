@@ -1,4 +1,4 @@
-const version = "clipflow-studio-v4";
+const version = "clipflow-studio-v5";
 const shell = ["/browser.html", "/studio.webmanifest", "/studio/icon.svg", "/studio/icon-192.png", "/studio/icon-512.png", "/studio/sample.webp", "/studio/sample.mp4", "/fonts/Outfit.ttf", "/fonts/Anton.ttf", "/fonts/NotoSansArabic.ttf"];
 self.addEventListener("install", event => {
   event.waitUntil((async () => {
